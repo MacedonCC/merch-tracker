@@ -66,8 +66,6 @@ interface UnmatchedLine {
   variantId: string;
   size: string;
   count: number;
-  lookupKey: string;
-  closestKeys: string[];
 }
 
 // Orders placed before this product had sizes in Wix at all — there's
@@ -206,14 +204,6 @@ export async function GET(req: NextRequest) {
   };
   const rows = (stock ?? []) as StockRow[];
 
-  // DIAGNOSTIC (temporary): how many stock rows this invocation actually
-  // received, to check for stale/cached results — see `stockRowCount` in
-  // the response. stock_items currently has 88 rows in the live database
-  // (confirmed via a direct query); if this comes back lower, or without
-  // recently-added rows, something between here and Supabase is serving
-  // a cached read rather than a fresh one.
-  const stockRowCount = rows.length;
-
   // A wix_product_id can cover several sizes (one Wix catalog product,
   // many variants). The bare product-ID key below is only meaningful
   // when a product has exactly one stock row — otherwise a line item
@@ -293,21 +283,12 @@ export async function GET(req: NextRequest) {
         if (existingEntry) {
           existingEntry.count += 1;
         } else {
-          const lookupKey = `${productName.toLowerCase()}::${normaliseSize(size)}`;
-          const namePrefix = `${productName.toLowerCase()}::`;
           unmatched.set(key, {
             productName: productName || 'Unknown product',
             productId,
             variantId,
             size,
             count: 1,
-            // TEMPORARY debug aid: the exact key this line tried against
-            // byName, and any keys already in byName that share its name
-            // prefix — shows byte-for-byte whether it's a name mismatch,
-            // a size mismatch, or the product just isn't in stock_items
-            // at all under this name. Remove once the polo is diagnosed.
-            lookupKey,
-            closestKeys: Array.from(byName.keys()).filter((k) => k.startsWith(namePrefix)),
           });
         }
         continue;
@@ -359,7 +340,6 @@ export async function GET(req: NextRequest) {
     awaitingHandover,
     unmatched: Array.from(unmatched.values()),
     noSizeRecorded: Array.from(noSizeRecorded.values()),
-    stockRowCount, // TEMPORARY diagnostic — see the comment above where it's computed
     message: unmatched.size
       ? 'Some Wix products are not linked to a stock item yet. Add their Wix product ID in the app.'
       : 'Sync complete.',
