@@ -42,7 +42,8 @@ interface OrderRow {
 const money = (n: number) =>
   new Intl.NumberFormat('en-AU', { style: 'currency', currency: 'AUD' }).format(n);
 
-export default function Tracker({ userEmail }: { userEmail: string }) {
+export default function Tracker({ userEmail, role }: { userEmail: string; role: 'admin' | 'helper' }) {
+  const isAdmin = role === 'admin';
   const supabase = useMemo(() => createClient(), []);
   const [tab, setTab] = useState<'stock' | 'fulfil' | 'restock' | 'orders'>('stock');
   const [stock, setStock] = useState<StockRow[]>([]);
@@ -265,6 +266,7 @@ export default function Tracker({ userEmail }: { userEmail: string }) {
             </button>
             <button className="tab" data-active={tab === 'orders'} onClick={() => setTab('orders')}>Orders</button>
           </div>
+          {isAdmin && <a href="/admin"><button>Members</button></a>}
           <button onClick={signOut}>Sign out</button>
         </div>
       </div>
@@ -296,7 +298,7 @@ export default function Tracker({ userEmail }: { userEmail: string }) {
         <div className="card">
           <div className="card-head">
             <h2>Inventory</h2>
-            <button className="btn-solid" onClick={() => setModal('item')}>Add item</button>
+            {isAdmin && <button className="btn-solid" onClick={() => setModal('item')}>Add item</button>}
           </div>
           <div className="filters">
             <input placeholder="Search items" value={search} onChange={(e) => setSearch(e.target.value)} />
@@ -341,6 +343,7 @@ export default function Tracker({ userEmail }: { userEmail: string }) {
                       type="number"
                       min="0"
                       defaultValue={s.target_level}
+                      disabled={!isAdmin}
                       onBlur={(e) => {
                         const v = Number(e.target.value);
                         if (v !== s.target_level) setTarget(s.id, v);
@@ -349,7 +352,7 @@ export default function Tracker({ userEmail }: { userEmail: string }) {
                     />
                   </td>
                   <td>{pill(s)}</td>
-                  <td><button className="btn-mini" onClick={() => { setEditing(s); setModal('edit'); }}>Count</button></td>
+                  <td>{isAdmin && <button className="btn-mini" onClick={() => { setEditing(s); setModal('edit'); }}>Count</button>}</td>
                 </tr>
               ))}
             </tbody>
