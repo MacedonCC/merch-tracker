@@ -130,6 +130,19 @@ function fulfilmentTimestamp(order: WixOrder): string {
   return order.fulfillments?.[0]?.dateCreated ?? order.createdDate ?? new Date().toISOString();
 }
 
+// Wix uses "Small"/"Medium"/"Large" on some products and "S"/"M"/"L" on
+// others, and stock_items mirrors whatever Wix had for that product. So
+// the name+size fallback match normalises both sides to the same
+// vocabulary rather than requiring an exact string match.
+const SIZE_ALIASES: Record<string, string> = {
+  small: 's', medium: 'm', large: 'l',
+};
+
+function normaliseSize(size: string): string {
+  const key = size.trim().toLowerCase();
+  return SIZE_ALIASES[key] ?? key;
+}
+
 export async function GET(req: NextRequest) {
   if (!authorised(req)) {
     return NextResponse.json({ error: 'Not authorised' }, { status: 401 });
@@ -188,7 +201,7 @@ export async function GET(req: NextRequest) {
       byWixId.set(`${s.wix_product_id}::${s.wix_variant_id ?? ''}`, s);
       byWixId.set(s.wix_product_id, s);
     }
-    byName.set(`${s.name.toLowerCase()}::${s.size.toLowerCase()}`, s);
+    byName.set(`${s.name.toLowerCase()}::${normaliseSize(s.size)}`, s);
   }
 
   // ---- Build every row to insert in memory, no DB calls here ----
@@ -217,7 +230,7 @@ export async function GET(req: NextRequest) {
       const match =
         byWixId.get(`${productId}::${variantId}`) ??
         byWixId.get(productId) ??
-        byName.get(`${productName.toLowerCase()}::`) ??
+        byName.get(`${productName.toLowerCase()}::${normaliseSize(size)}`) ??
         null;
 
       if (!match) {
