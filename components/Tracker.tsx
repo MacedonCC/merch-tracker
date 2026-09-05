@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { createClient } from '@/lib/supabase-client';
 
 const CATEGORIES = ['T-Shirt', 'Hoodie', 'Cap', 'Jacket', 'Shorts', 'Other'];
@@ -42,9 +42,42 @@ interface OrderRow {
 const money = (n: number) =>
   new Intl.NumberFormat('en-AU', { style: 'currency', currency: 'AUD' }).format(n);
 
-export default function Tracker({ userEmail, role }: { userEmail: string; role: 'admin' | 'helper' }) {
+function initials(email: string, fullName?: string | null): string {
+  const source = fullName?.trim() || email.split('@')[0];
+  const parts = source.split(/[.\s_-]+/).filter(Boolean);
+  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
+  return source.slice(0, 2).toUpperCase();
+}
+
+export default function Tracker({
+  userEmail,
+  fullName,
+  role,
+}: {
+  userEmail: string;
+  fullName?: string | null;
+  role: 'admin' | 'helper';
+}) {
   const isAdmin = role === 'admin';
   const supabase = useMemo(() => createClient(), []);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    function onPointerDown(e: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false);
+    }
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === 'Escape') setMenuOpen(false);
+    }
+    document.addEventListener('mousedown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [menuOpen]);
   const [tab, setTab] = useState<'stock' | 'fulfil' | 'restock' | 'orders'>('stock');
   const [stock, setStock] = useState<StockRow[]>([]);
   const [orders, setOrders] = useState<OrderRow[]>([]);
@@ -266,8 +299,34 @@ export default function Tracker({ userEmail, role }: { userEmail: string; role: 
             </button>
             <button className="tab" data-active={tab === 'orders'} onClick={() => setTab('orders')}>Orders</button>
           </div>
-          {isAdmin && <a href="/admin"><button>Members</button></a>}
-          <button onClick={signOut}>Sign out</button>
+          <div className="avatar-wrap" ref={menuRef}>
+            <button
+              className="avatar"
+              aria-label={`Account menu for ${userEmail}`}
+              aria-haspopup="true"
+              aria-expanded={menuOpen}
+              onClick={() => setMenuOpen((v) => !v)}
+            >
+              {initials(userEmail, fullName)}
+            </button>
+            {menuOpen && (
+              <div className="avatar-menu" role="menu">
+                <div className="avatar-menu-header">{userEmail}</div>
+                {isAdmin && (
+                  <button
+                    className="avatar-menu-item"
+                    role="menuitem"
+                    onClick={() => { setMenuOpen(false); window.location.href = '/admin'; }}
+                  >
+                    Admin
+                  </button>
+                )}
+                <button className="avatar-menu-item" role="menuitem" onClick={signOut}>
+                  Sign out
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 

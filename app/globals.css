@@ -100,6 +100,31 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1
 .bar { width: 70px; height: 5px; background: var(--wash); border-radius: 3px; display: inline-block; vertical-align: middle; margin-left: 8px; }
 .bar i { display: block; height: 5px; border-radius: 3px; }
 
+.avatar-wrap { position: relative; }
+.avatar {
+  width: 34px; height: 34px; padding: 0; border-radius: 50%;
+  background: var(--accent); border: 1px solid var(--accent);
+  color: #fff; font-size: 0.78rem; font-weight: 600;
+  display: flex; align-items: center; justify-content: center;
+}
+.avatar:hover { background: #17493f; }
+.avatar-menu {
+  position: absolute; top: calc(100% + 8px); right: 0; z-index: 60;
+  background: var(--paper); border: 1px solid var(--line); border-radius: var(--radius);
+  min-width: 220px; overflow: hidden;
+  box-shadow: 0 8px 24px rgba(20, 20, 18, 0.12);
+}
+.avatar-menu-header {
+  padding: 0.6rem 0.9rem; font-size: 0.78rem; color: var(--ink-soft);
+  border-bottom: 1px solid var(--line); word-break: break-all;
+}
+.avatar-menu-item {
+  display: block; width: 100%; text-align: left;
+  padding: 0.55rem 0.9rem; font-size: 0.85rem;
+  border: none; border-radius: 0; background: var(--paper);
+}
+.avatar-menu-item:hover { background: var(--wash); }
+
 .login-wrap { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 1.5rem; }
 .login-card { background: var(--paper); border: 1px solid var(--line); border-radius: 12px; padding: 2rem; width: 100%; max-width: 380px; }
 .login-card h1 { font-size: 1.2rem; font-weight: 600; margin-bottom: 0.35rem; }

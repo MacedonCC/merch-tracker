@@ -13,7 +13,7 @@ export default async function Home() {
   // Confirm this signed-in email is actually on the committee list.
   const { data: member } = await supabase
     .from('members')
-    .select('email, role')
+    .select('email, role, full_name')
     .ilike('email', user.email ?? '')
     .maybeSingle();
 
@@ -32,5 +32,11 @@ export default async function Home() {
     );
   }
 
-  return <Tracker userEmail={user.email ?? ''} role={member.role === 'admin' ? 'admin' : 'helper'} />;
+  return (
+    <Tracker
+      userEmail={user.email ?? ''}
+      fullName={member.full_name}
+      role={member.role === 'admin' ? 'admin' : 'helper'}
+    />
+  );
 }
