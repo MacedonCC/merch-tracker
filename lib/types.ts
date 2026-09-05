@@ -40,3 +40,10 @@ export function stockStatus(item: Pick<StockItem, 'quantity' | 'low_stock_alert'
 export function money(n: number): string {
   return new Intl.NumberFormat('en-AU', { style: 'currency', currency: 'AUD' }).format(n);
 }
+
+export function initials(email: string, fullName?: string | null): string {
+  const source = fullName?.trim() || email.split('@')[0];
+  const parts = source.split(/[.\s_-]+/).filter(Boolean);
+  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
+  return source.slice(0, 2).toUpperCase();
+}

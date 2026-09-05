@@ -1,7 +1,9 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { createClient } from '@/lib/supabase-client';
+
+export type Section = 'stock' | 'handovers' | 'restock' | 'orders';
 
 const CATEGORIES = ['T-Shirt', 'Hoodie', 'Cap', 'Jacket', 'Shorts', 'Other'];
 const SIZES = ['JNR8', 'JNR10', 'JNR12', 'JNR14', 'JNR16', 'XS', 'S', 'M', 'L', 'XL', '2XL', '3XL', '4XL', 'Small', 'Medium', 'Large', 'One size'];
@@ -42,43 +44,17 @@ interface OrderRow {
 const money = (n: number) =>
   new Intl.NumberFormat('en-AU', { style: 'currency', currency: 'AUD' }).format(n);
 
-function initials(email: string, fullName?: string | null): string {
-  const source = fullName?.trim() || email.split('@')[0];
-  const parts = source.split(/[.\s_-]+/).filter(Boolean);
-  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
-  return source.slice(0, 2).toUpperCase();
-}
-
-export default function Tracker({
+export default function TrackerSection({
+  section,
   userEmail,
-  fullName,
   role,
 }: {
+  section: Section;
   userEmail: string;
-  fullName?: string | null;
   role: 'admin' | 'helper';
 }) {
   const isAdmin = role === 'admin';
   const supabase = useMemo(() => createClient(), []);
-  const [menuOpen, setMenuOpen] = useState(false);
-  const menuRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!menuOpen) return;
-    function onPointerDown(e: MouseEvent) {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false);
-    }
-    function onKeyDown(e: KeyboardEvent) {
-      if (e.key === 'Escape') setMenuOpen(false);
-    }
-    document.addEventListener('mousedown', onPointerDown);
-    document.addEventListener('keydown', onKeyDown);
-    return () => {
-      document.removeEventListener('mousedown', onPointerDown);
-      document.removeEventListener('keydown', onKeyDown);
-    };
-  }, [menuOpen]);
-  const [tab, setTab] = useState<'stock' | 'fulfil' | 'restock' | 'orders'>('stock');
   const [stock, setStock] = useState<StockRow[]>([]);
   const [orders, setOrders] = useState<OrderRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -223,11 +199,6 @@ export default function Tracker({
     load();
   }
 
-  async function signOut() {
-    await supabase.auth.signOut();
-    window.location.href = '/login';
-  }
-
   // ---- Derived -------------------------------------------------------
   const byId = new Map(stock.map((s) => [s.id, s]));
 
@@ -272,7 +243,7 @@ export default function Tracker({
   });
 
   if (loading)
-    return <div className="shell"><p style={{ color: 'var(--ink-soft)' }}>Loading…</p></div>;
+    return <p style={{ color: 'var(--ink-soft)' }}>Loading…</p>;
 
   const pill = (s: StockRow) => {
     if (s.stock_status === 'oversold') return <span className="pill pill-out">Oversold</span>;
@@ -282,54 +253,7 @@ export default function Tracker({
   };
 
   return (
-    <div className="shell">
-      <div className="topbar">
-        <div className="brand">
-          <h1>Merchandise Tracker</h1>
-          <p>Signed in as {userEmail}</p>
-        </div>
-        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-          <div className="tabs">
-            <button className="tab" data-active={tab === 'stock'} onClick={() => setTab('stock')}>Stock</button>
-            <button className="tab" data-active={tab === 'fulfil'} onClick={() => setTab('fulfil')}>
-              Handovers{readyToHandOver.length ? ` (${readyToHandOver.length})` : ''}
-            </button>
-            <button className="tab" data-active={tab === 'restock'} onClick={() => setTab('restock')}>
-              Restock{restock.length ? ` (${restock.length})` : ''}
-            </button>
-            <button className="tab" data-active={tab === 'orders'} onClick={() => setTab('orders')}>Orders</button>
-          </div>
-          <div className="avatar-wrap" ref={menuRef}>
-            <button
-              className="avatar"
-              aria-label={`Account menu for ${userEmail}`}
-              aria-haspopup="true"
-              aria-expanded={menuOpen}
-              onClick={() => setMenuOpen((v) => !v)}
-            >
-              {initials(userEmail, fullName)}
-            </button>
-            {menuOpen && (
-              <div className="avatar-menu" role="menu">
-                <div className="avatar-menu-header">{userEmail}</div>
-                {isAdmin && (
-                  <button
-                    className="avatar-menu-item"
-                    role="menuitem"
-                    onClick={() => { setMenuOpen(false); window.location.href = '/admin'; }}
-                  >
-                    Admin
-                  </button>
-                )}
-                <button className="avatar-menu-item" role="menuitem" onClick={signOut}>
-                  Sign out
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-
+    <>
       {message && <div className="note note-ok" style={{ marginBottom: '1rem' }}>{message}</div>}
 
       <div className="metrics">
@@ -353,7 +277,7 @@ export default function Tracker({
       </div>
 
       {/* ---------------- Stock ---------------- */}
-      {tab === 'stock' && (
+      {section === 'stock' && (
         <div className="card">
           <div className="card-head">
             <h2>Inventory</h2>
@@ -420,7 +344,7 @@ export default function Tracker({
       )}
 
       {/* ---------------- Handovers ---------------- */}
-      {tab === 'fulfil' && (
+      {section === 'handovers' && (
         <>
           <div className="card" style={{ marginBottom: '1.25rem' }}>
             <div className="card-head"><h2>Ready to hand over</h2></div>
@@ -474,7 +398,7 @@ export default function Tracker({
       )}
 
       {/* ---------------- Restock ---------------- */}
-      {tab === 'restock' && (
+      {section === 'restock' && (
         <div className="card">
           <div className="card-head">
             <h2>What to order</h2>
@@ -508,7 +432,7 @@ export default function Tracker({
       )}
 
       {/* ---------------- Orders ---------------- */}
-      {tab === 'orders' && (
+      {section === 'orders' && (
         <div className="card">
           <div className="card-head">
             <h2>All orders</h2>
@@ -647,6 +571,6 @@ export default function Tracker({
           </form>
         </div>
       )}
-    </div>
+    </>
   );
 }

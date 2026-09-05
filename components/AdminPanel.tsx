@@ -69,17 +69,7 @@ export default function AdminPanel({
   }
 
   return (
-    <div className="shell">
-      <div className="topbar">
-        <div className="brand">
-          <h1>Members</h1>
-          <p>Who has access to the tracker</p>
-        </div>
-        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-          <a href="/"><button>Back to tracker</button></a>
-        </div>
-      </div>
-
+    <>
       {message && <div className="note note-ok" style={{ marginBottom: '1rem' }}>{message}</div>}
 
       <div className="card">
@@ -150,6 +140,6 @@ export default function AdminPanel({
           </form>
         </div>
       )}
-    </div>
+    </>
   );
 }

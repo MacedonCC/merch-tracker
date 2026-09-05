@@ -10,9 +10,15 @@ export interface CurrentMember {
   created_at: string;
 }
 
-// Looks up the signed-in user's row in `members`. Null if they're
-// signed in but not on the committee list.
-export async function getCurrentMember(): Promise<CurrentMember | null> {
+export interface Viewer {
+  email: string;
+  member: CurrentMember | null;
+}
+
+// Resolves the signed-in user's email and their row in `members`
+// (member is null if they're signed in but not on the committee list).
+// Returns null only if there's no signed-in user at all.
+export async function resolveViewer(): Promise<Viewer | null> {
   const supabase = createServerSupabase();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user?.email) return null;
@@ -23,10 +29,10 @@ export async function getCurrentMember(): Promise<CurrentMember | null> {
     .ilike('email', user.email)
     .maybeSingle();
 
-  return (data as CurrentMember) ?? null;
+  return { email: user.email, member: (data as CurrentMember) ?? null };
 }
 
-export async function isAdmin(): Promise<boolean> {
-  const member = await getCurrentMember();
-  return member?.role === 'admin';
+export async function getCurrentMember(): Promise<CurrentMember | null> {
+  const viewer = await resolveViewer();
+  return viewer?.member ?? null;
 }
