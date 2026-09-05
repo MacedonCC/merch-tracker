@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import Image from 'next/image';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase-client';
@@ -58,8 +59,18 @@ export default function Header({
   return (
     <div className="topbar">
       <div className="brand">
-        <h1>Macedon Cricket Club</h1>
-        <p>Merchandise Tracker</p>
+        <Image
+          src="/mcc-logo.jpg"
+          alt="Macedon Cricket Club logo"
+          width={44}
+          height={44}
+          className="brand-logo"
+          priority
+        />
+        <div>
+          <h1>Macedon Cricket Club</h1>
+          <p>Merchandise Tracker</p>
+        </div>
       </div>
       <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
         <div className="tabs">

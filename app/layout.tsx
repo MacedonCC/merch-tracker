@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'Merchandise Tracker',
+  title: 'MCC Clothing',
   description: 'Club clothing stock and order management',
 };
 

@@ -38,8 +38,14 @@ a { color: var(--accent); }
   border-bottom: 2px solid var(--brand-red);
   flex-wrap: wrap; gap: 1rem;
 }
+.brand { display: flex; align-items: center; gap: 10px; }
 .brand h1 { font-size: 1.3rem; font-weight: 600; letter-spacing: -0.01em; }
 .brand p { font-size: 0.82rem; color: var(--ink-soft); }
+.brand-logo { width: 44px; height: 44px; object-fit: contain; border-radius: 6px; flex-shrink: 0; }
+@media (max-width: 480px) {
+  .brand-logo { width: 34px; height: 34px; }
+  .brand h1 { font-size: 1.1rem; }
+}
 
 .tabs { display: flex; gap: 2px; background: var(--paper); border: 1px solid var(--line); border-radius: var(--radius); padding: 3px; }
 .tab { padding: 6px 15px; font-size: 0.85rem; border: none; background: none; cursor: pointer; border-radius: 5px; color: var(--ink-soft); font-family: inherit; text-decoration: none; display: inline-block; }

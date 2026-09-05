@@ -61,6 +61,8 @@ export default function TrackerSection({
   const [modal, setModal] = useState<'item' | 'order' | 'edit' | null>(null);
   const [editing, setEditing] = useState<StockRow | null>(null);
   const [message, setMessage] = useState('');
+  const [editingTarget, setEditingTarget] = useState<string | null>(null);
+  const [targetDraft, setTargetDraft] = useState('');
 
   const [search, setSearch] = useState('');
   const [cat, setCat] = useState('');
@@ -145,6 +147,14 @@ export default function TrackerSection({
   async function setTarget(id: string, value: number) {
     await supabase.from('stock_items').update({ target_level: Math.max(0, value) }).eq('id', id);
     load();
+  }
+
+  async function saveTargetEdit(s: StockRow) {
+    const v = Number(targetDraft);
+    setEditingTarget(null);
+    if (Number.isFinite(v) && v !== s.target_level) {
+      await setTarget(s.id, v);
+    }
   }
 
   async function addOrder(form: HTMLFormElement) {
@@ -322,17 +332,37 @@ export default function TrackerSection({
                     {s.available}
                   </td>
                   <td>
-                    <input
-                      type="number"
-                      min="0"
-                      defaultValue={s.target_level}
-                      disabled={!isAdmin}
-                      onBlur={(e) => {
-                        const v = Number(e.target.value);
-                        if (v !== s.target_level) setTarget(s.id, v);
-                      }}
-                      style={{ width: 62, padding: '3px 6px', fontSize: '0.8rem' }}
-                    />
+                    {isAdmin && editingTarget === s.id ? (
+                      <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                        <input
+                          type="number"
+                          min="0"
+                          autoFocus
+                          value={targetDraft}
+                          onChange={(e) => setTargetDraft(e.target.value)}
+                          onWheel={(e) => e.currentTarget.blur()}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Escape') { e.preventDefault(); setEditingTarget(null); }
+                            if (e.key === 'Enter') { e.preventDefault(); saveTargetEdit(s); }
+                          }}
+                          style={{ width: 56, padding: '3px 6px', fontSize: '0.8rem' }}
+                        />
+                        <button className="btn-mini" onClick={() => saveTargetEdit(s)}>Save</button>
+                        <button className="btn-mini" onClick={() => setEditingTarget(null)}>Cancel</button>
+                      </div>
+                    ) : (
+                      <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                        <span>{s.target_level}</span>
+                        {isAdmin && (
+                          <button
+                            className="btn-mini"
+                            onClick={() => { setEditingTarget(s.id); setTargetDraft(String(s.target_level)); }}
+                          >
+                            Edit
+                          </button>
+                        )}
+                      </div>
+                    )}
                   </td>
                   <td>{pill(s)}</td>
                   <td>{isAdmin && <button className="btn-mini" onClick={() => { setEditing(s); setModal('edit'); }}>Count</button>}</td>
@@ -502,12 +532,12 @@ export default function TrackerSection({
                 <select name="size">{SIZES.map((s) => <option key={s}>{s}</option>)}</select></div>
             </div>
             <div className="field-pair">
-              <div className="field"><label>Price (AUD)</label><input name="price" type="number" step="0.01" min="0" defaultValue="0" /></div>
-              <div className="field"><label>On hand now</label><input name="quantity" type="number" min="0" defaultValue="0" /></div>
+              <div className="field"><label>Price (AUD)</label><input name="price" type="number" step="0.01" min="0" defaultValue="0" onWheel={(e) => e.currentTarget.blur()} /></div>
+              <div className="field"><label>On hand now</label><input name="quantity" type="number" min="0" defaultValue="0" onWheel={(e) => e.currentTarget.blur()} /></div>
             </div>
             <div className="field-pair">
-              <div className="field"><label>Warn when available drops to</label><input name="alert" type="number" min="0" defaultValue="3" /></div>
-              <div className="field"><label>Target to hold</label><input name="target" type="number" min="0" defaultValue="5" /></div>
+              <div className="field"><label>Warn when available drops to</label><input name="alert" type="number" min="0" defaultValue="3" onWheel={(e) => e.currentTarget.blur()} /></div>
+              <div className="field"><label>Target to hold</label><input name="target" type="number" min="0" defaultValue="5" onWheel={(e) => e.currentTarget.blur()} /></div>
             </div>
             <div className="modal-actions">
               <button type="button" onClick={() => setModal(null)}>Cancel</button>
@@ -525,14 +555,14 @@ export default function TrackerSection({
               {editing.committed} owed to people. Available: {editing.available}.
             </p>
             <div className="field"><label>On hand (physical count)</label>
-              <input name="quantity" type="number" min="0" defaultValue={editing.on_hand} autoFocus /></div>
+              <input name="quantity" type="number" min="0" defaultValue={editing.on_hand} autoFocus onWheel={(e) => e.currentTarget.blur()} /></div>
             <div className="field"><label>Price (AUD)</label>
-              <input name="price" type="number" step="0.01" min="0" defaultValue={editing.price} /></div>
+              <input name="price" type="number" step="0.01" min="0" defaultValue={editing.price} onWheel={(e) => e.currentTarget.blur()} /></div>
             <div className="field-pair">
               <div className="field"><label>Warn when available drops to</label>
-                <input name="alert" type="number" min="0" defaultValue={editing.low_stock_alert} /></div>
+                <input name="alert" type="number" min="0" defaultValue={editing.low_stock_alert} onWheel={(e) => e.currentTarget.blur()} /></div>
               <div className="field"><label>Target to hold</label>
-                <input name="target" type="number" min="0" defaultValue={editing.target_level} /></div>
+                <input name="target" type="number" min="0" defaultValue={editing.target_level} onWheel={(e) => e.currentTarget.blur()} /></div>
             </div>
             <div className="modal-actions">
               <button type="button" onClick={() => setModal(null)}>Cancel</button>
@@ -558,7 +588,7 @@ export default function TrackerSection({
               </select>
             </div>
             <div className="field-pair">
-              <div className="field"><label>Quantity</label><input name="quantity" type="number" min="1" defaultValue="1" /></div>
+              <div className="field"><label>Quantity</label><input name="quantity" type="number" min="1" defaultValue="1" onWheel={(e) => e.currentTarget.blur()} /></div>
               <div className="field"><label>Payment</label>
                 <select name="status"><option value="pending">Not paid yet</option><option value="paid">Paid</option></select></div>
             </div>
