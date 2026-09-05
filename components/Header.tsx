@@ -7,13 +7,16 @@ import { usePathname, useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase-client';
 import { initials } from '@/lib/types';
 
-const NAV = [
-  { label: 'Home', href: '/' },
-  { label: 'Stock', href: '/stock' },
-  { label: 'Handovers', href: '/handovers' },
-  { label: 'Restock', href: '/restock' },
-  { label: 'Orders', href: '/orders' },
-];
+function navItems(isAdmin: boolean) {
+  return [
+    { label: 'Home', href: '/' },
+    { label: 'Stock', href: '/stock' },
+    { label: 'Handovers', href: '/handovers' },
+    { label: 'Restock', href: '/restock' },
+    { label: 'Orders', href: '/orders' },
+    ...(isAdmin ? [{ label: 'Members', href: '/admin' }] : []),
+  ];
+}
 
 export default function Header({
   userEmail,
@@ -26,7 +29,6 @@ export default function Header({
 }) {
   const isAdmin = role === 'admin';
   const pathname = usePathname();
-  const router = useRouter();
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -57,28 +59,21 @@ export default function Header({
   }
 
   return (
-    <div className="topbar">
-      <div className="brand">
-        <Image
-          src="/mcc-logo.jpg"
-          alt="Macedon Cricket Club logo"
-          width={44}
-          height={44}
-          className="brand-logo"
-          priority
-        />
-        <div>
-          <h1>Macedon Cricket Club</h1>
-          <p>Merchandise Tracker</p>
-        </div>
-      </div>
-      <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-        <div className="tabs">
-          {NAV.map((n) => (
-            <Link key={n.href} href={n.href} className="tab" data-active={isActive(n.href)}>
-              {n.label}
-            </Link>
-          ))}
+    <header className="site-header">
+      <div className="header-top">
+        <div className="brand">
+          <Image
+            src="/mcc-logo.jpg"
+            alt="Macedon Cricket Club logo"
+            width={88}
+            height={88}
+            className="brand-logo"
+            priority
+          />
+          <div>
+            <h1>Macedon Cricket Club</h1>
+            <p>Merchandise Tracker</p>
+          </div>
         </div>
         <div className="avatar-wrap" ref={menuRef}>
           <button
@@ -93,15 +88,6 @@ export default function Header({
           {menuOpen && (
             <div className="avatar-menu" role="menu">
               <div className="avatar-menu-header">{userEmail}</div>
-              {isAdmin && (
-                <button
-                  className="avatar-menu-item"
-                  role="menuitem"
-                  onClick={() => { setMenuOpen(false); router.push('/admin'); }}
-                >
-                  Admin
-                </button>
-              )}
               <button className="avatar-menu-item" role="menuitem" onClick={signOut}>
                 Sign out
               </button>
@@ -109,6 +95,15 @@ export default function Header({
           )}
         </div>
       </div>
-    </div>
+      <nav className="header-nav">
+        <div className="header-nav-inner">
+          {navItems(isAdmin).map((n) => (
+            <Link key={n.href} href={n.href} className="nav-tab" data-active={isActive(n.href)}>
+              {n.label}
+            </Link>
+          ))}
+        </div>
+      </nav>
+    </header>
   );
 }

@@ -20,9 +20,11 @@ export default async function AdminPage() {
     .order('created_at');
 
   return (
-    <div className="shell">
+    <>
       <Header userEmail={viewer.member.email} fullName={viewer.member.full_name} role={viewer.member.role} />
-      <AdminPanel initialMembers={(members as MemberRow[]) ?? []} selfEmail={viewer.member.email} />
-    </div>
+      <div className="shell">
+        <AdminPanel initialMembers={(members as MemberRow[]) ?? []} selfEmail={viewer.member.email} />
+      </div>
+    </>
   );
 }

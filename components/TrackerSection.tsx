@@ -61,8 +61,6 @@ export default function TrackerSection({
   const [modal, setModal] = useState<'item' | 'order' | 'edit' | null>(null);
   const [editing, setEditing] = useState<StockRow | null>(null);
   const [message, setMessage] = useState('');
-  const [editingTarget, setEditingTarget] = useState<string | null>(null);
-  const [targetDraft, setTargetDraft] = useState('');
 
   const [search, setSearch] = useState('');
   const [cat, setCat] = useState('');
@@ -142,19 +140,6 @@ export default function TrackerSection({
     setEditing(null);
     flash('Stock updated.');
     load();
-  }
-
-  async function setTarget(id: string, value: number) {
-    await supabase.from('stock_items').update({ target_level: Math.max(0, value) }).eq('id', id);
-    load();
-  }
-
-  async function saveTargetEdit(s: StockRow) {
-    const v = Number(targetDraft);
-    setEditingTarget(null);
-    if (Number.isFinite(v) && v !== s.target_level) {
-      await setTarget(s.id, v);
-    }
   }
 
   async function addOrder(form: HTMLFormElement) {
@@ -331,41 +316,9 @@ export default function TrackerSection({
                   <td style={{ color: s.available < 0 ? 'var(--alert)' : undefined, fontWeight: 500 }}>
                     {s.available}
                   </td>
-                  <td>
-                    {isAdmin && editingTarget === s.id ? (
-                      <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-                        <input
-                          type="number"
-                          min="0"
-                          autoFocus
-                          value={targetDraft}
-                          onChange={(e) => setTargetDraft(e.target.value)}
-                          onWheel={(e) => e.currentTarget.blur()}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Escape') { e.preventDefault(); setEditingTarget(null); }
-                            if (e.key === 'Enter') { e.preventDefault(); saveTargetEdit(s); }
-                          }}
-                          style={{ width: 56, padding: '3px 6px', fontSize: '0.8rem' }}
-                        />
-                        <button className="btn-mini" onClick={() => saveTargetEdit(s)}>Save</button>
-                        <button className="btn-mini" onClick={() => setEditingTarget(null)}>Cancel</button>
-                      </div>
-                    ) : (
-                      <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                        <span>{s.target_level}</span>
-                        {isAdmin && (
-                          <button
-                            className="btn-mini"
-                            onClick={() => { setEditingTarget(s.id); setTargetDraft(String(s.target_level)); }}
-                          >
-                            Edit
-                          </button>
-                        )}
-                      </div>
-                    )}
-                  </td>
+                  <td>{s.target_level}</td>
                   <td>{pill(s)}</td>
-                  <td>{isAdmin && <button className="btn-mini" onClick={() => { setEditing(s); setModal('edit'); }}>Count</button>}</td>
+                  <td>{isAdmin && <button className="btn-mini" onClick={() => { setEditing(s); setModal('edit'); }}>Edit</button>}</td>
                 </tr>
               ))}
             </tbody>
