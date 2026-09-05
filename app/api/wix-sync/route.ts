@@ -29,9 +29,26 @@ import { createAdminSupabase } from '@/lib/supabase-server';
 // this reasoning is based on its documented intent, not a direct read
 // of the live trigger definition — worth confirming against the
 // actual trigger in Supabase before relying on it in production.
+//
+// PERFORMANCE: this does exactly 3 Supabase calls total, regardless
+// of how many orders are imported — one read of existing (wix_order_id,
+// stock_item_id) pairs, one read of the stock list, and one bulk
+// upsert of every new row. Everything else (matching, deduping,
+// building the row list) happens in memory. Wix pagination stops once
+// `limit` orders have been fetched (default 500, see the ?limit=
+// query param) so a very large store can be imported in a few
+// separate requests if one run isn't enough to stay under Vercel's
+// Hobby-plan 60s function limit. There's no persisted cursor between
+// requests, so re-running with the same limit re-fetches the same
+// first N orders from Wix — harmless, since the duplicate guard and
+// the unique constraint both skip anything already imported, but it
+// won't reach further orders on its own. Raise ?limit= to cover more
+// in one run instead.
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
+
+const DEFAULT_LIMIT = 500;
 
 interface WixLineItem {
   catalogReference?: { catalogItemId?: string; options?: { variantId?: string } };
@@ -64,9 +81,9 @@ function authorised(req: NextRequest): boolean {
   return header === `Bearer ${secret}`;
 }
 
-// Pages through cursorPaging until Wix stops returning a next cursor,
-// so this pulls the entire order history rather than a lookback window.
-async function fetchAllWixOrders(): Promise<WixOrder[]> {
+// Pages through cursorPaging, stopping once `limit` orders have been
+// collected (or Wix runs out of pages first).
+async function fetchWixOrders(limit: number): Promise<WixOrder[]> {
   const all: WixOrder[] = [];
   let cursor: string | undefined;
 
@@ -93,9 +110,9 @@ async function fetchAllWixOrders(): Promise<WixOrder[]> {
     const data = await res.json();
     all.push(...(data.orders ?? []));
     cursor = data.metadata?.cursors?.next ?? undefined;
-  } while (cursor);
+  } while (cursor && all.length < limit);
 
-  return all;
+  return all.slice(0, limit);
 }
 
 function fulfilmentTimestamp(order: WixOrder): string {
@@ -114,11 +131,14 @@ export async function GET(req: NextRequest) {
     );
   }
 
+  const limitParam = Number(req.nextUrl.searchParams.get('limit'));
+  const limit = Number.isFinite(limitParam) && limitParam > 0 ? Math.floor(limitParam) : DEFAULT_LIMIT;
+
   const supabase = createAdminSupabase();
 
   let wixOrders: WixOrder[];
   try {
-    wixOrders = await fetchAllWixOrders();
+    wixOrders = await fetchWixOrders(limit);
   } catch (err) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : 'Could not reach Wix' },
@@ -129,7 +149,7 @@ export async function GET(req: NextRequest) {
   // Which (Wix order, stock item) line pairs do we already have? A
   // multi-item Wix order imports as one row per line item, all sharing
   // the same wix_order_id, so the duplicate guard has to be keyed on
-  // the pair, not wix_order_id alone (see migration-005).
+  // the pair, not wix_order_id alone (see migration-005). One query.
   const { data: existing } = await supabase
     .from('orders')
     .select('wix_order_id, stock_item_id')
@@ -137,7 +157,7 @@ export async function GET(req: NextRequest) {
 
   const seen = new Set((existing ?? []).map((o) => `${o.wix_order_id}::${o.stock_item_id ?? ''}`));
 
-  // Load the stock list so we can match Wix products to our rows.
+  // Load the stock list so we can match Wix products to our rows. One query.
   const { data: stock } = await supabase
     .from('stock_items')
     .select('id, name, size, price, wix_product_id, wix_variant_id');
@@ -158,10 +178,11 @@ export async function GET(req: NextRequest) {
     byName.set(`${s.name.toLowerCase()}::${s.size.toLowerCase()}`, s);
   }
 
-  let imported = 0;
+  // ---- Build every row to insert in memory, no DB calls here ----
+  const toInsert: Record<string, unknown>[] = [];
+  const unmatched: string[] = [];
   let fulfilled = 0;
   let awaitingHandover = 0;
-  const unmatched: string[] = [];
 
   for (const order of wixOrders) {
     if (order.paymentStatus !== 'PAID') continue;
@@ -191,11 +212,12 @@ export async function GET(req: NextRequest) {
 
       const lineKey = `${order.id}::${match.id}`;
       if (seen.has(lineKey)) continue;
+      seen.add(lineKey); // guards against the same pair appearing twice in this batch
 
-      // distributed_at is set here, in the INSERT itself, so the
-      // AFTER UPDATE stock trigger never fires for historical imports —
-      // see the note at the top of this file.
-      const { error } = await supabase.from('orders').insert({
+      const distributedAt = isFulfilled ? fulfilmentTimestamp(order) : null;
+      if (isFulfilled) fulfilled += 1; else awaitingHandover += 1;
+
+      toInsert.push({
         customer_name: customerName,
         customer_email: order.buyerInfo?.email ?? null,
         stock_item_id: match.id,
@@ -205,23 +227,31 @@ export async function GET(req: NextRequest) {
         source: 'wix',
         wix_order_id: order.id,
         ordered_at: order.createdDate ?? new Date().toISOString(),
-        distributed_at: isFulfilled ? fulfilmentTimestamp(order) : null,
+        distributed_at: distributedAt,
         notes: order.number ? `Wix order #${order.number}` : null,
       });
+    }
+  }
 
-      if (!error) {
-        seen.add(lineKey);
-        imported += 1;
-        if (isFulfilled) fulfilled += 1;
-        else awaitingHandover += 1;
-      }
+  // ---- One bulk write for everything gathered above ----
+  // distributed_at is set here, in the same INSERT as the rest of the
+  // row, so the AFTER UPDATE stock trigger never fires for historical
+  // imports — see the note at the top of this file. ignoreDuplicates
+  // is a safety net on top of the in-memory `seen` check above.
+  if (toInsert.length > 0) {
+    const { error } = await supabase
+      .from('orders')
+      .upsert(toInsert, { onConflict: 'wix_order_id,stock_item_id', ignoreDuplicates: true });
+
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
     }
   }
 
   return NextResponse.json({
     ok: true,
     totalFetched: wixOrders.length,
-    imported,
+    imported: toInsert.length,
     fulfilled,
     awaitingHandover,
     unmatched: Array.from(new Set(unmatched)),
