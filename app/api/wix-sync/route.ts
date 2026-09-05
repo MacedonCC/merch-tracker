@@ -66,6 +66,8 @@ interface UnmatchedLine {
   variantId: string;
   size: string;
   count: number;
+  lookupKey: string;
+  closestKeys: string[];
 }
 
 interface WixFulfillment {
@@ -194,12 +196,27 @@ export async function GET(req: NextRequest) {
   };
   const rows = (stock ?? []) as StockRow[];
 
+  // A wix_product_id can cover several sizes (one Wix catalog product,
+  // many variants). The bare product-ID key below is only meaningful
+  // when a product has exactly one stock row — otherwise a line item
+  // that arrives without a variantId would silently resolve to
+  // whichever size happened to be inserted last, rather than falling
+  // through to name+size matching as it should.
+  const productIdCounts = new Map<string, number>();
+  for (const s of rows) {
+    if (s.wix_product_id) {
+      productIdCounts.set(s.wix_product_id, (productIdCounts.get(s.wix_product_id) ?? 0) + 1);
+    }
+  }
+
   const byWixId = new Map<string, StockRow>();
   const byName = new Map<string, StockRow>();
   for (const s of rows) {
     if (s.wix_product_id) {
       byWixId.set(`${s.wix_product_id}::${s.wix_variant_id ?? ''}`, s);
-      byWixId.set(s.wix_product_id, s);
+      if (productIdCounts.get(s.wix_product_id) === 1) {
+        byWixId.set(s.wix_product_id, s);
+      }
     }
     byName.set(`${s.name.toLowerCase()}::${normaliseSize(s.size)}`, s);
   }
@@ -239,12 +256,21 @@ export async function GET(req: NextRequest) {
         if (existingEntry) {
           existingEntry.count += 1;
         } else {
+          const lookupKey = `${productName.toLowerCase()}::${normaliseSize(size)}`;
+          const namePrefix = `${productName.toLowerCase()}::`;
           unmatched.set(key, {
             productName: productName || 'Unknown product',
             productId,
             variantId,
             size,
             count: 1,
+            // TEMPORARY debug aid: the exact key this line tried against
+            // byName, and any keys already in byName that share its name
+            // prefix — shows byte-for-byte whether it's a name mismatch,
+            // a size mismatch, or the product just isn't in stock_items
+            // at all under this name. Remove once the polo is diagnosed.
+            lookupKey,
+            closestKeys: Array.from(byName.keys()).filter((k) => k.startsWith(namePrefix)),
           });
         }
         continue;
