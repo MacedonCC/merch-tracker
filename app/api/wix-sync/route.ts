@@ -7,7 +7,7 @@ import { createAdminSupabase } from '@/lib/supabase-server';
 // import as several rows (one per line item), all sharing the same
 // wix_order_id, so duplicates are filtered on the (wix_order_id,
 // stock_item_id) pair rather than wix_order_id alone — see
-// migration-005.
+// migration-005 and migration-006.
 //
 // Orders whose Wix fulfillmentStatus is FULFILLED are inserted with
 // distributed_at already set, so they don't show up in Handovers as
@@ -149,7 +149,9 @@ export async function GET(req: NextRequest) {
   // Which (Wix order, stock item) line pairs do we already have? A
   // multi-item Wix order imports as one row per line item, all sharing
   // the same wix_order_id, so the duplicate guard has to be keyed on
-  // the pair, not wix_order_id alone (see migration-005). One query.
+  // the pair, not wix_order_id alone (see migration-005 and
+  // migration-006, which is what makes the pair usable as this
+  // route's upsert conflict target). One query.
   const { data: existing } = await supabase
     .from('orders')
     .select('wix_order_id, stock_item_id')
