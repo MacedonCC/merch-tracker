@@ -70,6 +70,16 @@ interface UnmatchedLine {
   closestKeys: string[];
 }
 
+// Orders placed before this product had sizes in Wix at all — there's
+// no size to guess, so these are reported separately from genuine
+// name/size mismatches rather than mixed into `unmatched`.
+interface NoSizeLine {
+  productName: string;
+  productId: string;
+  variantId: string;
+  count: number;
+}
+
 interface WixFulfillment {
   dateCreated?: string;
 }
@@ -196,6 +206,14 @@ export async function GET(req: NextRequest) {
   };
   const rows = (stock ?? []) as StockRow[];
 
+  // DIAGNOSTIC (temporary): how many stock rows this invocation actually
+  // received, to check for stale/cached results — see `stockRowCount` in
+  // the response. stock_items currently has 88 rows in the live database
+  // (confirmed via a direct query); if this comes back lower, or without
+  // recently-added rows, something between here and Supabase is serving
+  // a cached read rather than a fresh one.
+  const stockRowCount = rows.length;
+
   // A wix_product_id can cover several sizes (one Wix catalog product,
   // many variants). The bare product-ID key below is only meaningful
   // when a product has exactly one stock row — otherwise a line item
@@ -224,6 +242,7 @@ export async function GET(req: NextRequest) {
   // ---- Build every row to insert in memory, no DB calls here ----
   const toInsert: Record<string, unknown>[] = [];
   const unmatched = new Map<string, UnmatchedLine>();
+  const noSizeRecorded = new Map<string, NoSizeLine>();
   let fulfilled = 0;
   let awaitingHandover = 0;
 
@@ -251,6 +270,24 @@ export async function GET(req: NextRequest) {
         null;
 
       if (!match) {
+        if (!size) {
+          // Placed before this product had sizes recorded in Wix at
+          // all — nothing to guess, so it's kept out of `unmatched`.
+          const noSizeKey = `${productId}::${variantId}`;
+          const existingNoSize = noSizeRecorded.get(noSizeKey);
+          if (existingNoSize) {
+            existingNoSize.count += 1;
+          } else {
+            noSizeRecorded.set(noSizeKey, {
+              productName: productName || 'Unknown product',
+              productId,
+              variantId,
+              count: 1,
+            });
+          }
+          continue;
+        }
+
         const key = `${productId}::${variantId}::${size}`;
         const existingEntry = unmatched.get(key);
         if (existingEntry) {
@@ -321,6 +358,8 @@ export async function GET(req: NextRequest) {
     fulfilled,
     awaitingHandover,
     unmatched: Array.from(unmatched.values()),
+    noSizeRecorded: Array.from(noSizeRecorded.values()),
+    stockRowCount, // TEMPORARY diagnostic — see the comment above where it's computed
     message: unmatched.size
       ? 'Some Wix products are not linked to a stock item yet. Add their Wix product ID in the app.'
       : 'Sync complete.',
