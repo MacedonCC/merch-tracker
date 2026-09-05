@@ -51,10 +51,21 @@ export const maxDuration = 60;
 const DEFAULT_LIMIT = 500;
 
 interface WixLineItem {
-  catalogReference?: { catalogItemId?: string; options?: { variantId?: string } };
+  catalogReference?: {
+    catalogItemId?: string;
+    options?: { variantId?: string; options?: Record<string, string> };
+  };
   productName?: { original?: string };
   quantity?: number;
   price?: { amount?: string };
+}
+
+interface UnmatchedLine {
+  productName: string;
+  productId: string;
+  variantId: string;
+  size: string;
+  count: number;
 }
 
 interface WixFulfillment {
@@ -182,7 +193,7 @@ export async function GET(req: NextRequest) {
 
   // ---- Build every row to insert in memory, no DB calls here ----
   const toInsert: Record<string, unknown>[] = [];
-  const unmatched: string[] = [];
+  const unmatched = new Map<string, UnmatchedLine>();
   let fulfilled = 0;
   let awaitingHandover = 0;
 
@@ -200,6 +211,8 @@ export async function GET(req: NextRequest) {
       const productId = line.catalogReference?.catalogItemId ?? '';
       const variantId = line.catalogReference?.options?.variantId ?? '';
       const productName = line.productName?.original ?? '';
+      const choices = line.catalogReference?.options?.options ?? {};
+      const size = choices.Size ?? (Object.values(choices).join(' / ') || '');
 
       const match =
         byWixId.get(`${productId}::${variantId}`) ??
@@ -208,7 +221,19 @@ export async function GET(req: NextRequest) {
         null;
 
       if (!match) {
-        unmatched.push(productName || productId || 'unknown product');
+        const key = `${productId}::${variantId}::${size}`;
+        const existingEntry = unmatched.get(key);
+        if (existingEntry) {
+          existingEntry.count += 1;
+        } else {
+          unmatched.set(key, {
+            productName: productName || 'Unknown product',
+            productId,
+            variantId,
+            size,
+            count: 1,
+          });
+        }
         continue;
       }
 
@@ -256,8 +281,8 @@ export async function GET(req: NextRequest) {
     imported: toInsert.length,
     fulfilled,
     awaitingHandover,
-    unmatched: Array.from(new Set(unmatched)),
-    message: unmatched.length
+    unmatched: Array.from(unmatched.values()),
+    message: unmatched.size
       ? 'Some Wix products are not linked to a stock item yet. Add their Wix product ID in the app.'
       : 'Sync complete.',
     ranAt: new Date().toISOString(),
