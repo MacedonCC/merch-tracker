@@ -121,6 +121,12 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1
 .field label { display: block; font-size: 0.78rem; color: var(--ink-soft); margin-bottom: 4px; }
 .field-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 
+.checkbox-group { display: flex; flex-wrap: wrap; gap: 8px 18px; margin-bottom: 0.85rem; }
+.checkbox-row { display: flex; align-items: center; gap: 6px; font-size: 0.82rem; color: var(--ink); }
+.checkbox-row input { width: auto; }
+.perm-cell { text-align: center; }
+td.perm-cell input { width: auto; }
+
 .overlay { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.6); display: flex; align-items: center; justify-content: center; padding: 1rem; z-index: 50; }
 .modal { background: var(--paper); border-radius: 12px; padding: 1.5rem; width: 100%; max-width: 440px; max-height: 88vh; overflow-y: auto; }
 .modal h3 { font-size: 1rem; font-weight: 600; margin-bottom: 1rem; }
@@ -171,6 +177,7 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1
   display: block; width: 100%; text-align: left;
   padding: 0.55rem 0.9rem; font-size: 0.85rem;
   border: none; border-radius: 0; background: var(--paper); color: var(--ink);
+  text-decoration: none;
 }
 .avatar-menu-item:hover { background: var(--wash); }
 

@@ -1,5 +1,5 @@
 import { notFound, redirect } from 'next/navigation';
-import { resolveViewer } from '@/lib/member';
+import { resolveViewer, effectivePermissions } from '@/lib/member';
 import Header from '@/components/Header';
 import TrackerSection, { type Section } from '@/components/TrackerSection';
 import NotOnCommitteeList from '@/components/NotOnCommitteeList';
@@ -23,6 +23,7 @@ export default async function SectionPage({ params }: { params: { section: strin
           section={params.section as Section}
           userEmail={viewer.member.email}
           role={viewer.member.role}
+          permissions={effectivePermissions(viewer.member)}
         />
       </div>
     </>

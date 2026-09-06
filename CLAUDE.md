@@ -41,12 +41,64 @@ There is no test suite in this repo.
     functions (see `supabase/migrations/20260905000004_member_roles_and_rls.sql`).
   - **Server-side role checks** in API routes that use the service-role
     client and therefore bypass RLS — e.g. `app/api/members/route.ts` calls
-    `resolveViewer()` (`lib/member.ts`) and rejects non-admins before doing
+    `requireAdmin()` (`lib/member.ts`) and rejects non-admins before doing
     anything. Never rely on a page/route being unreachable through the UI as
     the only access control — routes using `createAdminSupabase()` must
     check the caller's role themselves.
 - A signed-in user with no `members` row is not an error state — they see
   `NotOnCommitteeList`, not a redirect.
+- The admin page is reachable only from the avatar menu (`Header.tsx`),
+  which only renders that link for admins — there's no nav-bar entry. This
+  is the same "UI hiding is not access control" caveat as above: `/admin`
+  itself re-checks `role === 'admin'` server-side and redirects otherwise.
+
+### Permission model — helpers can hold four fine-grained flags
+
+Beyond `admin` / `helper`, a helper can be granted any combination of
+`can_adjust_stock`, `can_change_prices`, `can_change_targets`,
+`can_undo_handover` (columns on `members`, added in
+`supabase/migrations/20260906000001_permissions_and_invitations.sql`).
+Admins have all four implicitly regardless of the column values — that
+rule lives in exactly one place, `effectivePermissions()` in
+`lib/member.ts`, and both `TrackerSection.tsx` (to hide/disable controls)
+and `app/[section]/page.tsx` (to compute the `permissions` prop) go
+through it. Never read the raw `member.can_*` columns directly in UI code.
+
+Row-level security can only gate whole rows, not individual columns, so
+the column-level rules are enforced by two `BEFORE UPDATE` trigger
+functions, not by the RLS policy itself:
+- `check_stock_item_update()` on `stock_items` — compares `OLD`/`NEW` and
+  raises unless the changed column's permission is held (or the caller is
+  admin). Also blocks helpers from touching item identity fields (name,
+  category, size, Wix linking) entirely.
+- `check_order_update()` on `orders` — blocks clearing `distributed_at`
+  (undoing a handover) without `can_undo_handover`.
+
+Both look up the caller by `auth.jwt() ->> 'email'` against `members`, the
+same pattern `is_admin()` uses. When adding a new permission-gated field,
+extend the relevant trigger — adding it only to the RLS policy won't give
+you column granularity.
+
+### Invitations — how a person actually gets committee access
+
+`invitations` (same migration as above) records an offer: email, role,
+the four permission flags, `invited_by`, `invited_at`, `expires_at` (7
+days), `status` (`pending` | `accepted` | `revoked`). Creating one
+(`POST /api/invitations`) does **not** create a `members` row — it never
+has enough to bypass RLS's admin-only insert intentionally. The row only
+gets created when the invitee actually signs in: `app/auth/callback/route.ts`
+looks for a pending, unexpired invitation matching the signed-in email
+and, if found, inserts the `members` row from it (service-role client)
+and marks the invitation `accepted`. This means:
+- Re-inviting an email that hasn't accepted yet is always safe (no
+  members row exists yet to conflict with).
+- An admin using **Add directly** (`POST /api/members`) skips invitations
+  entirely and creates the row immediately — for fixing a role or
+  adopting an auth user that already exists outside this flow.
+- `invitations` has no `full_name` column; a name entered on the invite
+  form rides along in the auth user's `user_metadata.full_name` (set via
+  `inviteUserByEmail`'s `data` option) and is read back in the callback
+  when the `members` row is finally created.
 
 ### Two Supabase clients (`lib/supabase-server.ts`)
 
@@ -60,15 +112,20 @@ There is no test suite in this repo.
   `supabase-js`'s internal fetches even on `force-dynamic` routes, so a
   request can silently return an outdated row count. Don't remove this.
 - `lib/supabase-client.ts` is the browser client (anon key) used by client
-  components for direct reads/writes that RLS is expected to police (e.g.
-  `TrackerSection.tsx`, `AdminPanel.tsx`'s role toggle).
+  components for direct reads/writes that RLS (and the triggers below) are
+  expected to police — e.g. `TrackerSection.tsx`'s stock/order edits.
+  `AdminPanel.tsx` instead goes through the `app/api/members` and
+  `app/api/invitations` routes for everything, since those need the
+  service-role client (to invite/delete auth users) and a hand-rolled
+  admin check either way.
 
 ### Route protection patterns
 
 Two different auth patterns are used depending on who calls the route:
 
-- **Committee/admin actions** (`app/api/members/*`): check the signed-in
-  user via `resolveViewer()` + role, using the cookie-bound client.
+- **Committee/admin actions** (`app/api/members/*`, `app/api/invitations/*`):
+  check the signed-in user via `requireAdmin()` (`lib/member.ts`), using the
+  cookie-bound client, before doing anything with the service-role client.
 - **Cron/webhook-style routes** (`app/api/wix-sync`, `wix-import`,
   `wix-inventory`): check a bearer token against `CRON_SECRET`, since there's
   no signed-in user. These are also excluded from the auth middleware

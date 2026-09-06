@@ -1,21 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createServerSupabase, createAdminSupabase } from '@/lib/supabase-server';
-import { resolveViewer } from '@/lib/member';
+import { createAdminSupabase } from '@/lib/supabase-server';
+import { requireAdmin } from '@/lib/member';
 
-// Verifies the caller is signed in AND has role 'admin' in `members`.
-// Must be checked here, server-side — the admin page hiding itself in the
-// UI is not access control.
-async function requireAdmin() {
-  const viewer = await resolveViewer();
-  if (!viewer?.member || viewer.member.role !== 'admin') return null;
-  return viewer.member;
-}
-
-// Adds a committee member: creates the `members` row and sends a Supabase
-// auth invite email so they can sign in. If an auth user already exists
-// for that email (e.g. they signed in once before being added, or were
-// removed and re-added), the members row is still created — they just
-// don't get a fresh invite email, since they can already sign in.
+// "Add directly" — creates a members row with no invitation email.
+// For fixing a role or adopting an account that already exists in
+// auth.users (e.g. from before this tracker, or a previous invite).
+// The normal path for a brand new person is POST /api/invitations.
 export async function POST(request: NextRequest) {
   const admin = await requireAdmin();
   if (!admin) return NextResponse.json({ error: 'Admins only.' }, { status: 403 });
@@ -27,22 +17,12 @@ export async function POST(request: NextRequest) {
   if (!email) return NextResponse.json({ error: 'Email is required.' }, { status: 400 });
 
   const db = createAdminSupabase();
-
-  const { data: member, error: insertError } = await db
+  const { data: member, error } = await db
     .from('members')
     .insert({ email, full_name: fullName, role })
-    .select('id, email, full_name, role, created_at')
+    .select('id, email, full_name, role, created_at, can_adjust_stock, can_change_prices, can_change_targets, can_undo_handover')
     .single();
-  if (insertError) return NextResponse.json({ error: insertError.message }, { status: 400 });
+  if (error) return NextResponse.json({ error: error.message }, { status: 400 });
 
-  const redirectTo = `${request.nextUrl.origin}/auth/callback`;
-  const { error: inviteError } = await db.auth.admin.inviteUserByEmail(email, { redirectTo });
-
-  if (!inviteError) {
-    return NextResponse.json({ member, invited: true, alreadyRegistered: false });
-  }
-  if (inviteError.code === 'email_exists' || /already been registered|already exists/i.test(inviteError.message)) {
-    return NextResponse.json({ member, invited: false, alreadyRegistered: true });
-  }
-  return NextResponse.json({ member, invited: false, alreadyRegistered: false, inviteError: inviteError.message });
+  return NextResponse.json({ member });
 }

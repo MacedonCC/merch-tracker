@@ -9,10 +9,9 @@ interface Counts {
   readyToHandOver: number;
   linesToReorder: number;
   unpaidOrders: number;
-  memberCount: number | null;
 }
 
-const EMPTY: Counts = { onHand: 0, readyToHandOver: 0, linesToReorder: 0, unpaidOrders: 0, memberCount: null };
+const EMPTY: Counts = { onHand: 0, readyToHandOver: 0, linesToReorder: 0, unpaidOrders: 0 };
 
 function TileEmoji({ children }: { children: string }) {
   return (
@@ -26,20 +25,16 @@ function TileEmoji({ children }: { children: string }) {
   );
 }
 
-export default function HomeTiles({ role }: { role: 'admin' | 'helper' }) {
-  const isAdmin = role === 'admin';
+export default function HomeTiles() {
   const [counts, setCounts] = useState<Counts>(EMPTY);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     (async () => {
       const supabase = createClient();
-      const [{ data: stock }, { data: orders }, membersResult] = await Promise.all([
+      const [{ data: stock }, { data: orders }] = await Promise.all([
         supabase.from('stock_overview').select('id, on_hand, suggested_order'),
         supabase.from('orders').select('quantity, payment_status, distributed_at, stock_item_id'),
-        isAdmin
-          ? supabase.from('members').select('id', { count: 'exact', head: true })
-          : Promise.resolve({ count: null }),
       ]);
 
       const onHandById = new Map((stock ?? []).map((s) => [s.id, s.on_hand as number]));
@@ -55,11 +50,10 @@ export default function HomeTiles({ role }: { role: 'admin' | 'helper' }) {
         readyToHandOver,
         linesToReorder: (stock ?? []).filter((s) => (s.suggested_order as number) > 0).length,
         unpaidOrders: (orders ?? []).filter((o) => o.payment_status === 'pending').length,
-        memberCount: 'count' in membersResult ? membersResult.count : null,
       });
       setLoading(false);
     })();
-  }, [isAdmin]);
+  }, []);
 
   const tiles = [
     {
@@ -98,17 +92,6 @@ export default function HomeTiles({ role }: { role: 'admin' | 'helper' }) {
       value: counts.unpaidOrders,
       label: 'unpaid orders',
     },
-    ...(isAdmin
-      ? [{
-          href: '/admin',
-          category: 'Admin',
-          title: 'Members',
-          icon: <TileEmoji>👥</TileEmoji>,
-          description: 'Who has access to the tracker.',
-          value: counts.memberCount ?? 0,
-          label: 'on the committee list',
-        }]
-      : []),
   ];
 
   return (

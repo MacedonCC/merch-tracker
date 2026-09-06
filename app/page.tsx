@@ -15,7 +15,7 @@ export default async function HomePage() {
     <>
       <Header userEmail={viewer.member.email} fullName={viewer.member.full_name} role={viewer.member.role} />
       <div className="shell">
-        <HomeTiles role={viewer.member.role} />
+        <HomeTiles />
       </div>
     </>
   );

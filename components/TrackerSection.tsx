@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { createClient } from '@/lib/supabase-client';
+import type { MemberPermissions } from '@/lib/member';
 
 export type Section = 'stock' | 'handovers' | 'restock' | 'orders';
 
@@ -48,12 +49,15 @@ export default function TrackerSection({
   section,
   userEmail,
   role,
+  permissions,
 }: {
   section: Section;
   userEmail: string;
   role: 'admin' | 'helper';
+  permissions: MemberPermissions;
 }) {
   const isAdmin = role === 'admin';
+  const canEditStock = permissions.can_adjust_stock || permissions.can_change_prices || permissions.can_change_targets;
   const supabase = useMemo(() => createClient(), []);
   const [stock, setStock] = useState<StockRow[]>([]);
   const [orders, setOrders] = useState<OrderRow[]>([]);
@@ -112,16 +116,23 @@ export default function TrackerSection({
   async function saveItem(form: HTMLFormElement) {
     if (!editing) return;
     const f = new FormData(form);
-    const newQty = Number(f.get('quantity')) || 0;
+    // Read a field's new value only if the viewer is actually allowed to
+    // change it — a disabled input is excluded from FormData anyway, but
+    // this also stops a re-enabled field (e.g. via devtools) from being
+    // sent as a change; the RLS trigger enforces this again server-side.
+    const newQty = permissions.can_adjust_stock ? Number(f.get('quantity')) || 0 : editing.on_hand;
+    const newPrice = permissions.can_change_prices ? Number(f.get('price')) || 0 : editing.price;
+    const newAlert = permissions.can_change_targets ? Number(f.get('alert')) || 0 : editing.low_stock_alert;
+    const newTarget = permissions.can_change_targets ? Number(f.get('target')) || 0 : editing.target_level;
     const diff = newQty - editing.on_hand;
 
     const { error } = await supabase
       .from('stock_items')
       .update({
         quantity: newQty,
-        price: Number(f.get('price')) || 0,
-        low_stock_alert: Number(f.get('alert')) || 0,
-        target_level: Number(f.get('target')) || 0,
+        price: newPrice,
+        low_stock_alert: newAlert,
+        target_level: newTarget,
         updated_at: new Date().toISOString(),
       })
       .eq('id', editing.id);
@@ -318,7 +329,7 @@ export default function TrackerSection({
                   </td>
                   <td>{s.target_level}</td>
                   <td>{pill(s)}</td>
-                  <td>{isAdmin && <button className="btn-mini" onClick={() => { setEditing(s); setModal('edit'); }}>Edit</button>}</td>
+                  <td>{canEditStock && <button className="btn-mini" onClick={() => { setEditing(s); setModal('edit'); }}>Edit</button>}</td>
                 </tr>
               ))}
             </tbody>
@@ -460,7 +471,7 @@ export default function TrackerSection({
                     {o.payment_status === 'paid' && !o.distributed_at && (
                       <button className="btn-mini" onClick={() => handOver(o.id)}>Hand over</button>
                     )}
-                    {o.distributed_at && (
+                    {o.distributed_at && permissions.can_undo_handover && (
                       <button className="btn-mini" onClick={() => undoHandover(o.id)}>Undo</button>
                     )}
                     <button className="btn-mini" onClick={() => removeOrder(o.id)}>Remove</button>
@@ -508,14 +519,14 @@ export default function TrackerSection({
               {editing.committed} owed to people. Available: {editing.available}.
             </p>
             <div className="field"><label>On hand (physical count)</label>
-              <input name="quantity" type="number" min="0" defaultValue={editing.on_hand} autoFocus onWheel={(e) => e.currentTarget.blur()} /></div>
+              <input name="quantity" type="number" min="0" defaultValue={editing.on_hand} autoFocus disabled={!permissions.can_adjust_stock} onWheel={(e) => e.currentTarget.blur()} /></div>
             <div className="field"><label>Price (AUD)</label>
-              <input name="price" type="number" step="0.01" min="0" defaultValue={editing.price} onWheel={(e) => e.currentTarget.blur()} /></div>
+              <input name="price" type="number" step="0.01" min="0" defaultValue={editing.price} disabled={!permissions.can_change_prices} onWheel={(e) => e.currentTarget.blur()} /></div>
             <div className="field-pair">
               <div className="field"><label>Warn when available drops to</label>
-                <input name="alert" type="number" min="0" defaultValue={editing.low_stock_alert} onWheel={(e) => e.currentTarget.blur()} /></div>
+                <input name="alert" type="number" min="0" defaultValue={editing.low_stock_alert} disabled={!permissions.can_change_targets} onWheel={(e) => e.currentTarget.blur()} /></div>
               <div className="field"><label>Target to hold</label>
-                <input name="target" type="number" min="0" defaultValue={editing.target_level} onWheel={(e) => e.currentTarget.blur()} /></div>
+                <input name="target" type="number" min="0" defaultValue={editing.target_level} disabled={!permissions.can_change_targets} onWheel={(e) => e.currentTarget.blur()} /></div>
             </div>
             <div className="modal-actions">
               <button type="button" onClick={() => setModal(null)}>Cancel</button>

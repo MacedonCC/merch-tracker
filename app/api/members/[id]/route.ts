@@ -1,25 +1,47 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminSupabase } from '@/lib/supabase-server';
-import { resolveViewer } from '@/lib/member';
+import { requireAdmin } from '@/lib/member';
+import { findAuthUserId } from '@/lib/auth-admin';
 
-async function requireAdmin() {
-  const viewer = await resolveViewer();
-  if (!viewer?.member || viewer.member.role !== 'admin') return null;
-  return viewer.member;
-}
+const PERMISSION_FIELDS = ['can_adjust_stock', 'can_change_prices', 'can_change_targets', 'can_undo_handover'] as const;
 
-// Finds the auth.users id for an email. supabase-js's admin API has no
-// get-user-by-email call, so this pages through listUsers looking for it.
-async function findAuthUserId(db: ReturnType<typeof createAdminSupabase>, email: string) {
-  const target = email.toLowerCase();
-  for (let page = 1; page <= 20; page++) {
-    const { data, error } = await db.auth.admin.listUsers({ page, perPage: 200 });
-    if (error || !data) return null;
-    const match = data.users.find((u) => u.email?.toLowerCase() === target);
-    if (match) return match.id;
-    if (data.users.length < 200) return null;
+// Updates a member's role and/or permission flags (the Committee
+// table's "Make admin/helper" and per-row Save button).
+export async function PATCH(request: NextRequest, { params }: { params: { id: string } }) {
+  const admin = await requireAdmin();
+  if (!admin) return NextResponse.json({ error: 'Admins only.' }, { status: 403 });
+
+  const body = await request.json().catch(() => null);
+  const update: Record<string, boolean | string> = {};
+
+  if (body?.role !== undefined) {
+    if (params.id === admin.id && body.role !== 'admin') {
+      return NextResponse.json({ error: "You can't change your own role." }, { status: 400 });
+    }
+    if (body.role !== 'admin' && body.role !== 'helper') {
+      return NextResponse.json({ error: 'Role must be admin or helper.' }, { status: 400 });
+    }
+    update.role = body.role;
   }
-  return null;
+
+  for (const field of PERMISSION_FIELDS) {
+    if (body?.[field] !== undefined) update[field] = !!body[field];
+  }
+
+  if (Object.keys(update).length === 0) {
+    return NextResponse.json({ error: 'Nothing to update.' }, { status: 400 });
+  }
+
+  const db = createAdminSupabase();
+  const { data: member, error } = await db
+    .from('members')
+    .update(update)
+    .eq('id', params.id)
+    .select('id, email, full_name, role, created_at, can_adjust_stock, can_change_prices, can_change_targets, can_undo_handover')
+    .single();
+  if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+
+  return NextResponse.json({ member });
 }
 
 // Removes a committee member: deletes the `members` row and, if a
@@ -28,6 +50,9 @@ async function findAuthUserId(db: ReturnType<typeof createAdminSupabase>, email:
 export async function DELETE(request: NextRequest, { params }: { params: { id: string } }) {
   const admin = await requireAdmin();
   if (!admin) return NextResponse.json({ error: 'Admins only.' }, { status: 403 });
+  if (params.id === admin.id) {
+    return NextResponse.json({ error: "You can't remove yourself." }, { status: 400 });
+  }
 
   const db = createAdminSupabase();
 

@@ -7,16 +7,13 @@ import { usePathname, useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase-client';
 import { initials } from '@/lib/types';
 
-function navItems(isAdmin: boolean) {
-  return [
-    { label: 'Home', href: '/' },
-    { label: 'Stock', href: '/stock' },
-    { label: 'Handovers', href: '/handovers' },
-    { label: 'Restock', href: '/restock' },
-    { label: 'Orders', href: '/orders' },
-    ...(isAdmin ? [{ label: 'Members', href: '/admin' }] : []),
-  ];
-}
+const NAV_ITEMS = [
+  { label: 'Home', href: '/' },
+  { label: 'Stock', href: '/stock' },
+  { label: 'Handovers', href: '/handovers' },
+  { label: 'Restock', href: '/restock' },
+  { label: 'Orders', href: '/orders' },
+];
 
 export default function Header({
   userEmail,
@@ -88,6 +85,11 @@ export default function Header({
           {menuOpen && (
             <div className="avatar-menu" role="menu">
               <div className="avatar-menu-header">{userEmail}</div>
+              {isAdmin && (
+                <Link href="/admin" className="avatar-menu-item" role="menuitem" onClick={() => setMenuOpen(false)}>
+                  Admin
+                </Link>
+              )}
               <button className="avatar-menu-item" role="menuitem" onClick={signOut}>
                 Sign out
               </button>
@@ -97,7 +99,7 @@ export default function Header({
       </div>
       <nav className="header-nav">
         <div className="header-nav-inner">
-          {navItems(isAdmin).map((n) => (
+          {NAV_ITEMS.map((n) => (
             <Link key={n.href} href={n.href} className="nav-tab" data-active={isActive(n.href)}>
               {n.label}
             </Link>

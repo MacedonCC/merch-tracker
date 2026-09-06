@@ -116,11 +116,22 @@ that arrives in your inbox. You're in.
 
 ## Adding committee members
 
-Supabase → **Table Editor** → `members` → **Insert row**. Enter their email and
-a role (`admin`, `treasurer`, or `viewer`). They can then sign in with a magic
-link. No password to set or share.
+Use the **Admin** page (the avatar menu, top right — only admins see it), not
+the Supabase dashboard.
 
-To remove someone, delete their row. They're locked out immediately.
+- **Invitations** is the normal way to add someone: enter their email, role
+  (`admin` or `helper`), and which of the four permissions to grant
+  (adjusting stock, changing prices, changing targets, undoing a handover —
+  admins get all four regardless of the checkboxes). They get an email with a
+  sign-in link; the committee-list row is created automatically once they
+  click it. Invitations expire after 7 days — re-send or revoke from the same
+  page.
+- **Add directly** creates the row without emailing an invitation, for fixing
+  someone's role or adopting an account that already exists.
+
+To remove someone, use **Remove** on their row in the Committee table — this
+deletes both their committee-list row and their sign-in account, so they're
+locked out immediately.
 
 ---
 
