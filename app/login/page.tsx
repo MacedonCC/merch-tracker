@@ -1,6 +1,7 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import Image from 'next/image';
 import { createClient } from '@/lib/supabase-client';
 
 export default function LoginPage() {
@@ -9,6 +10,20 @@ export default function LoginPage() {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [googleBusy, setGoogleBusy] = useState(false);
+
+  // A failed magic-link or OAuth callback (expired code, or Google
+  // sign-in for an account Supabase won't create) redirects back here
+  // with ?error= rather than showing anything itself — surface that
+  // instead of silently landing back on a blank form. window.location
+  // is used directly (instead of useSearchParams) so this page can stay
+  // statically prerendered.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.has('error')) {
+      setError("That sign-in attempt didn't go through — the link may have expired, or the account isn't set up yet. Try again, or ask an admin to invite you.");
+      window.history.replaceState({}, '', '/login');
+    }
+  }, []);
 
   async function signInWithGoogle() {
     setError('');
@@ -50,8 +65,19 @@ export default function LoginPage() {
   return (
     <div className="login-wrap">
       <div className="login-card">
-        <h1>Merchandise Tracker</h1>
+        <Image
+          src="/mcc-logo.jpg"
+          alt="Macedon Cricket Club logo"
+          width={72}
+          height={72}
+          className="login-logo"
+          priority
+        />
+        <h1>Macedon Cricket Club</h1>
+        <p className="login-subtitle">Merchandise Tracker</p>
         <p>Committee access only. We&apos;ll email you a sign-in link.</p>
+
+        {error && !sent && <div className="note note-bad" style={{ marginBottom: '1rem' }}>{error}</div>}
 
         {sent ? (
           <div className="note note-ok">
@@ -91,7 +117,6 @@ export default function LoginPage() {
             <button className="btn-solid" style={{ width: '100%' }} onClick={sendLink} disabled={busy}>
               {busy ? 'Sending…' : 'Email me a link'}
             </button>
-            {error && <div className="note note-bad">{error}</div>}
           </>
         )}
       </div>

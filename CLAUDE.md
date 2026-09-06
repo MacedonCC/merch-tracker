@@ -109,10 +109,19 @@ and marks the invitation `accepted`. This means:
 - `createAdminSupabase()` — service-role key, bypasses RLS. Used for
   privileged operations (member invite/removal, Wix sync/import) and always
   paired with a manual auth check first.
-- Both force `cache: 'no-store'` on every fetch (`noStoreFetch`). This was a
-  deliberate fix for stale reads: Next.js's Data Cache can cache
-  `supabase-js`'s internal fetches even on `force-dynamic` routes, so a
-  request can silently return an outdated row count. Don't remove this.
+- Both force `cache: 'no-store'` on every fetch, via the shared
+  `noStoreFetch` helper in `lib/no-store-fetch.ts`. This was a deliberate
+  fix for stale reads: Next.js's Data Cache can cache `supabase-js`'s
+  internal fetches even on `force-dynamic` routes or in Middleware, so a
+  request can silently return stale data — a wix-sync run once
+  under-reported stock, and separately `middleware.ts`'s own
+  `getUser()` call (it builds its own client rather than reusing this
+  file, since `next/headers`'s `cookies()` isn't available in
+  Middleware) was missing this, so a cached "no session" response could
+  outlive an actual sign-in and bounce a freshly authenticated user back
+  to `/login`. Any new Supabase client construction — including
+  Middleware's — needs `global: { fetch: noStoreFetch }`, not just the
+  two clients in this file.
 - `lib/supabase-client.ts` is the browser client (anon key) used by client
   components for direct reads/writes that RLS (and the triggers below) are
   expected to police — e.g. `TrackerSection.tsx`'s stock/order edits.

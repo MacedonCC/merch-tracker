@@ -1,6 +1,7 @@
 import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 import type { CookieOptions } from '@supabase/ssr';
+import { noStoreFetch } from '@/lib/no-store-fetch';
 
 type CookieItem = { name: string; value: string; options?: CookieOptions };
 
@@ -22,6 +23,11 @@ export async function middleware(request: NextRequest) {
           );
         },
       },
+      // See lib/no-store-fetch.ts — without this, getUser() below can
+      // return a cached "no session" result even right after a
+      // successful sign-in, which would send an authenticated user
+      // straight back to /login before their own page ever runs.
+      global: { fetch: noStoreFetch },
     }
   );
 
