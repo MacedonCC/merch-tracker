@@ -1,8 +1,57 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { createClient } from '@/lib/supabase-client';
 import type { MemberPermissions } from '@/lib/member';
+
+// A small "..." menu for a row's secondary actions — Remove today,
+// anything else later — kept separate from the one visible primary
+// action per row (Mark paid / Hand over / Undo).
+function RowMenu({ actions }: { actions: { label: string; onClick: () => void }[] }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function onPointerDown(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener('mousedown', onPointerDown);
+    return () => document.removeEventListener('mousedown', onPointerDown);
+  }, [open]);
+
+  if (actions.length === 0) return null;
+
+  return (
+    <div className="row-menu-wrap" ref={ref}>
+      <button
+        type="button"
+        className="row-menu-btn"
+        aria-label="More actions"
+        aria-haspopup="true"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+      >
+        ⋯
+      </button>
+      {open && (
+        <div className="row-menu" role="menu">
+          {actions.map((a) => (
+            <button
+              key={a.label}
+              type="button"
+              role="menuitem"
+              className="row-menu-item"
+              onClick={() => { setOpen(false); a.onClick(); }}
+            >
+              {a.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export type Section = 'stock' | 'restock' | 'orders';
 
@@ -249,6 +298,14 @@ export default function TrackerSection({
     load();
   }
 
+  async function removeOrder(id: string) {
+    if (!confirm('Remove this order?')) return;
+    const { error } = await supabase.from('orders').delete().eq('id', id);
+    if (error) return flash(error.message);
+    flash('Order removed.');
+    load();
+  }
+
   // ---- Derived -------------------------------------------------------
   const byId = new Map(stock.map((s) => [s.id, s]));
 
@@ -454,7 +511,12 @@ export default function TrackerSection({
                   </div>
                   <div className="order-group-items">
                     {g.items.map((i) => (
-                      <div key={i.id}>{i.quantity} × {i.stock_items ? `${i.stock_items.name} · ${i.stock_items.size}` : '—'}</div>
+                      <div key={i.id} className="order-group-item">
+                        <span>{i.quantity} × {i.stock_items ? `${i.stock_items.name} · ${i.stock_items.size}` : '—'}</span>
+                        {isAdmin && (
+                          <RowMenu actions={[{ label: 'Remove', onClick: () => removeOrder(i.id) }]} />
+                        )}
+                      </div>
                     ))}
                   </div>
                   <button className="btn-mini" onClick={() => handOverGroup(g.items.map((i) => i.id))}>
@@ -466,11 +528,11 @@ export default function TrackerSection({
           ) : (
             <table>
               <thead>
-                <tr><th>Who</th><th>Item</th><th>Qty</th><th>Status</th><th></th></tr>
+                <tr><th>Who</th><th>Item</th><th>Qty</th><th>Status</th><th></th><th></th></tr>
               </thead>
               <tbody>
                 {visibleOrders.length === 0 ? (
-                  <tr><td colSpan={5}><div className="empty">No orders match.</div></td></tr>
+                  <tr><td colSpan={6}><div className="empty">No orders match.</div></td></tr>
                 ) : visibleOrders.map(({ order: o, state }) => (
                   <tr key={o.id}>
                     <td>
@@ -499,6 +561,11 @@ export default function TrackerSection({
                       )}
                       {state === 'done' && permissions.can_undo_handover && (
                         <button className="btn-mini btn-quiet" onClick={() => undoHandover(o.id)}>Undo</button>
+                      )}
+                    </td>
+                    <td>
+                      {isAdmin && (
+                        <RowMenu actions={[{ label: 'Remove', onClick: () => removeOrder(o.id) }]} />
                       )}
                     </td>
                   </tr>

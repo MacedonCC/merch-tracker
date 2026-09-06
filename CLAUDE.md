@@ -89,6 +89,14 @@ functions, not by the RLS policy itself:
 - `check_order_update()` on `orders` — blocks clearing `distributed_at`
   (undoing a handover) without `can_undo_handover`.
 
+Deleting an order (the Orders page's "Remove", tucked behind an
+admin-only `...` row menu — see `RowMenu` in `TrackerSection.tsx`) is
+plain row-level, not column-level, so it's just an RLS policy rather
+than a trigger: `supabase/migrations/20260906000002_admin_only_order_delete.sql`
+split the old single "orders full access" policy into separate
+select/insert/update policies open to any committee member and a
+delete policy gated on `is_admin()`.
+
 Both look up the caller by `auth.jwt() ->> 'email'` against `members`, the
 same pattern `is_admin()` uses. When adding a new permission-gated field,
 extend the relevant trigger — adding it only to the RLS policy won't give

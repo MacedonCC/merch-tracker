@@ -139,6 +139,25 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1
 .order-group-who div { font-size: 0.75rem; color: var(--ink-faint); }
 .order-group-items { flex: 1 1 auto; font-size: 0.85rem; color: var(--ink-soft); }
 .order-group-items div + div { margin-top: 2px; }
+.order-group-item { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+
+.row-menu-wrap { position: relative; display: inline-block; }
+.row-menu-btn {
+  padding: 3px 8px; font-size: 0.9rem; line-height: 1; color: var(--ink-faint);
+  background: transparent; border-color: transparent;
+}
+.row-menu-btn:hover { background: var(--wash); color: var(--ink-soft); }
+.row-menu {
+  position: absolute; top: calc(100% + 4px); right: 0; z-index: 30;
+  background: var(--paper); border: 1px solid var(--line); border-radius: var(--radius);
+  min-width: 140px; overflow: hidden; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+.row-menu-item {
+  display: block; width: 100%; text-align: left;
+  padding: 0.5rem 0.8rem; font-size: 0.82rem;
+  border: none; border-radius: 0; background: var(--paper); color: var(--ink);
+}
+.row-menu-item:hover { background: var(--wash); }
 
 .field { margin-bottom: 0.85rem; }
 .field label { display: block; font-size: 0.78rem; color: var(--ink-soft); margin-bottom: 4px; }
