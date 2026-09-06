@@ -213,9 +213,14 @@ memory; keep that shape when touching it.
 
 ### Route structure
 
-- `app/[section]/page.tsx` — dynamic route for `stock` | `handovers` |
-  `restock` | `orders`, all rendered by the same `TrackerSection` client
-  component with a `section` prop.
+- `app/[section]/page.tsx` — dynamic route for `stock` | `restock` |
+  `orders`, all rendered by the same `TrackerSection` client component
+  with a `section` prop. Orders (payment status × handover status)
+  collapses to four states — unpaid / ready / waiting on stock / done —
+  via `classifyOrder()` in `TrackerSection.tsx`; there's no separate
+  Handovers route or table column for this, it's derived from
+  `payment_status`, `distributed_at`, and the matching stock item's
+  `on_hand` every render.
 - `app/admin/page.tsx` — committee member management, admin-only (see
   access control above).
 - `app/page.tsx` — home tiles (`HomeTiles.tsx`) linking into the sections.

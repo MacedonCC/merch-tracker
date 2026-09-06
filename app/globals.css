@@ -105,6 +105,8 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 .btn-solid { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 500; }
 .btn-solid:hover { background: #1c54c0; }
 .btn-mini { padding: 3px 9px; font-size: 0.76rem; }
+.btn-quiet { background: transparent; border-color: transparent; color: var(--ink-faint); }
+.btn-quiet:hover { background: transparent; color: var(--ink-soft); text-decoration: underline; }
 
 input, select, textarea {
   font-family: inherit; font-size: 0.87rem; padding: 7px 10px;
@@ -116,6 +118,27 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1
 .filters { display: flex; gap: 8px; padding: 0.75rem 1.15rem; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
 .filters input { max-width: 240px; }
 .filters select { max-width: 160px; }
+
+.chip-row { display: flex; gap: 8px; padding: 0.9rem 1.15rem; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 14px; border-radius: 999px; font-size: 0.82rem; font-weight: 500;
+  border: 1px solid var(--line-strong); background: var(--wash); color: var(--ink-soft);
+}
+.chip:hover { color: var(--ink); }
+.chip[data-active="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+.chip-count { font-size: 0.72rem; opacity: 0.85; }
+
+.order-groups { display: flex; flex-direction: column; }
+.order-group {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  padding: 0.75rem 1.15rem; border-bottom: 1px solid var(--line); flex-wrap: wrap;
+}
+.order-group:last-child { border-bottom: none; }
+.order-group-who strong { font-weight: 500; }
+.order-group-who div { font-size: 0.75rem; color: var(--ink-faint); }
+.order-group-items { flex: 1 1 auto; font-size: 0.85rem; color: var(--ink-soft); }
+.order-group-items div + div { margin-top: 2px; }
 
 .field { margin-bottom: 0.85rem; }
 .field label { display: block; font-size: 0.78rem; color: var(--ink-soft); margin-bottom: 4px; }

@@ -8,10 +8,9 @@ interface Counts {
   onHand: number;
   readyToHandOver: number;
   linesToReorder: number;
-  unpaidOrders: number;
 }
 
-const EMPTY: Counts = { onHand: 0, readyToHandOver: 0, linesToReorder: 0, unpaidOrders: 0 };
+const EMPTY: Counts = { onHand: 0, readyToHandOver: 0, linesToReorder: 0 };
 
 function TileEmoji({ children }: { children: string }) {
   return (
@@ -49,7 +48,6 @@ export default function HomeTiles() {
         onHand: (stock ?? []).reduce((n, s) => n + (s.on_hand as number), 0),
         readyToHandOver,
         linesToReorder: (stock ?? []).filter((s) => (s.suggested_order as number) > 0).length,
-        unpaidOrders: (orders ?? []).filter((o) => o.payment_status === 'pending').length,
       });
       setLoading(false);
     })();
@@ -66,15 +64,6 @@ export default function HomeTiles() {
       label: 'garments on hand',
     },
     {
-      href: '/handovers',
-      category: 'Fulfilment',
-      title: 'Handovers',
-      icon: <TileEmoji>📦</TileEmoji>,
-      description: 'Paid orders ready to give out.',
-      value: counts.readyToHandOver,
-      label: 'ready to hand over',
-    },
-    {
       href: '/restock',
       category: 'Purchasing',
       title: 'Restock',
@@ -85,12 +74,12 @@ export default function HomeTiles() {
     },
     {
       href: '/orders',
-      category: 'Sales',
+      category: 'Fulfilment',
       title: 'Orders',
       icon: <TileEmoji>🧾</TileEmoji>,
-      description: 'Every order, paid or not.',
-      value: counts.unpaidOrders,
-      label: 'unpaid orders',
+      description: 'Paid orders ready to give out.',
+      value: counts.readyToHandOver,
+      label: 'ready to hand over',
     },
   ];
 

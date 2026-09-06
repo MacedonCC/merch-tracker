@@ -6,7 +6,7 @@ import NotOnCommitteeList from '@/components/NotOnCommitteeList';
 
 export const dynamic = 'force-dynamic';
 
-const SECTIONS: Section[] = ['stock', 'handovers', 'restock', 'orders'];
+const SECTIONS: Section[] = ['stock', 'restock', 'orders'];
 
 export default async function SectionPage({ params }: { params: { section: string } }) {
   if (!SECTIONS.includes(params.section as Section)) notFound();

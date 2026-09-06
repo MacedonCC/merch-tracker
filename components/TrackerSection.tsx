@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { createClient } from '@/lib/supabase-client';
 import type { MemberPermissions } from '@/lib/member';
 
-export type Section = 'stock' | 'handovers' | 'restock' | 'orders';
+export type Section = 'stock' | 'restock' | 'orders';
 
 const CATEGORIES = ['T-Shirt', 'Hoodie', 'Cap', 'Jacket', 'Shorts', 'Other'];
 const SIZES = ['JNR8', 'JNR10', 'JNR12', 'JNR14', 'JNR16', 'XS', 'S', 'M', 'L', 'XL', '2XL', '3XL', '4XL', 'Small', 'Medium', 'Large', 'One size'];
@@ -45,6 +45,55 @@ interface OrderRow {
 const money = (n: number) =>
   new Intl.NumberFormat('en-AU', { style: 'currency', currency: 'AUD' }).format(n);
 
+// Each order has two independent facts — paid or not, handed over or
+// not — but the four things a helper actually cares about collapse
+// those into one state: an unpaid order is "unpaid" regardless of
+// stock; a paid, handed-over order is "done" regardless of how it got
+// there (including the unreachable-via-this-UI 'refunded' status,
+// which falls back to "unpaid" here since nothing in the app ever sets
+// it and it doesn't fit any of the four named buckets).
+type OrderState = 'unpaid' | 'ready' | 'waiting' | 'done';
+
+function classifyOrder(o: OrderRow, byId: Map<string, StockRow>): OrderState {
+  if (o.distributed_at) return 'done';
+  if (o.payment_status === 'paid') {
+    const s = o.stock_item_id ? byId.get(o.stock_item_id) : null;
+    const onHand = s ? s.on_hand : 0;
+    return onHand >= o.quantity ? 'ready' : 'waiting';
+  }
+  return 'unpaid';
+}
+
+const CHIPS: { key: 'all' | OrderState; label: string }[] = [
+  { key: 'all', label: 'All' },
+  { key: 'unpaid', label: 'Unpaid' },
+  { key: 'ready', label: 'Ready' },
+  { key: 'waiting', label: 'Waiting on stock' },
+  { key: 'done', label: 'Done' },
+];
+
+interface OrderGroup {
+  key: string;
+  name: string;
+  email: string | null;
+  items: OrderRow[];
+}
+
+// Groups ready-to-hand-over orders by customer so one visit collects
+// everything they're owed. A group of one renders identically to a
+// plain row (see the Ready view below) — this only changes how many
+// item lines and whether the button says "all".
+function groupByCustomer(orders: OrderRow[]): OrderGroup[] {
+  const map = new Map<string, OrderGroup>();
+  for (const o of orders) {
+    const key = `${o.customer_name.trim().toLowerCase()}|${(o.customer_email ?? '').trim().toLowerCase()}`;
+    const existing = map.get(key);
+    if (existing) existing.items.push(o);
+    else map.set(key, { key, name: o.customer_name, email: o.customer_email, items: [o] });
+  }
+  return Array.from(map.values());
+}
+
 export default function TrackerSection({
   section,
   userEmail,
@@ -70,7 +119,7 @@ export default function TrackerSection({
   const [cat, setCat] = useState('');
   const [level, setLevel] = useState('');
   const [orderSearch, setOrderSearch] = useState('');
-  const [orderFilter, setOrderFilter] = useState('');
+  const [orderChip, setOrderChip] = useState<'all' | OrderState>('ready');
 
   async function load() {
     const [{ data: s }, { data: o }] = await Promise.all([
@@ -183,42 +232,25 @@ export default function TrackerSection({
     load();
   }
 
-  async function handOver(id: string) {
-    await supabase
+  async function handOverGroup(ids: string[]) {
+    const { error } = await supabase
       .from('orders')
       .update({ distributed_at: new Date().toISOString() })
-      .eq('id', id);
-    flash('Handed over. Stock reduced.');
+      .in('id', ids);
+    if (error) return flash(error.message);
+    flash(ids.length > 1 ? `Handed over ${ids.length} items.` : 'Handed over.');
     load();
   }
 
   async function undoHandover(id: string) {
-    await supabase.from('orders').update({ distributed_at: null }).eq('id', id);
-    flash('Handover reversed. Stock returned.');
-    load();
-  }
-
-  async function removeOrder(id: string) {
-    if (!confirm('Remove this order?')) return;
-    await supabase.from('orders').delete().eq('id', id);
-    flash('Order removed.');
+    const { error } = await supabase.from('orders').update({ distributed_at: null }).eq('id', id);
+    if (error) return flash(error.message);
+    flash('Handover reversed.');
     load();
   }
 
   // ---- Derived -------------------------------------------------------
   const byId = new Map(stock.map((s) => [s.id, s]));
-
-  const readyToHandOver = orders.filter((o) => {
-    if (o.payment_status !== 'paid' || o.distributed_at) return false;
-    const s = o.stock_item_id ? byId.get(o.stock_item_id) : null;
-    return s ? s.on_hand >= o.quantity : false;
-  });
-
-  const waitingOnStock = orders.filter((o) => {
-    if (o.payment_status !== 'paid' || o.distributed_at) return false;
-    const s = o.stock_item_id ? byId.get(o.stock_item_id) : null;
-    return s ? s.on_hand < o.quantity : true;
-  });
 
   const restock = stock
     .filter((s) => s.suggested_order > 0)
@@ -241,12 +273,25 @@ export default function TrackerSection({
     );
   });
 
-  const visibleOrders = orders.filter((o) => {
-    const q = orderSearch.toLowerCase();
-    const label = `${o.customer_name} ${o.stock_items?.name ?? ''}`.toLowerCase();
-    const state = o.distributed_at ? 'distributed' : o.payment_status;
-    return (!q || label.includes(q)) && (!orderFilter || state === orderFilter);
+  const classifiedOrders = orders.map((o) => ({ order: o, state: classifyOrder(o, byId) }));
+
+  const orderCounts = {
+    all: classifiedOrders.length,
+    unpaid: classifiedOrders.filter((c) => c.state === 'unpaid').length,
+    ready: classifiedOrders.filter((c) => c.state === 'ready').length,
+    waiting: classifiedOrders.filter((c) => c.state === 'waiting').length,
+    done: classifiedOrders.filter((c) => c.state === 'done').length,
+  };
+
+  const searchedOrders = classifiedOrders.filter(({ order: o }) => {
+    const q = orderSearch.trim().toLowerCase();
+    if (!q) return true;
+    return o.customer_name.toLowerCase().includes(q) || (o.customer_email ?? '').toLowerCase().includes(q);
   });
+
+  const visibleOrders = orderChip === 'all' ? searchedOrders : searchedOrders.filter((c) => c.state === orderChip);
+
+  const readyGroups = groupByCustomer(searchedOrders.filter((c) => c.state === 'ready').map((c) => c.order));
 
   if (loading)
     return <p style={{ color: 'var(--ink-soft)' }}>Loading…</p>;
@@ -337,60 +382,6 @@ export default function TrackerSection({
         </div>
       )}
 
-      {/* ---------------- Handovers ---------------- */}
-      {section === 'handovers' && (
-        <>
-          <div className="card" style={{ marginBottom: '1.25rem' }}>
-            <div className="card-head"><h2>Ready to hand over</h2></div>
-            <table>
-              <thead><tr><th>Who</th><th>Item</th><th>Qty</th><th>Ordered</th><th></th></tr></thead>
-              <tbody>
-                {readyToHandOver.length === 0 ? (
-                  <tr><td colSpan={5}><div className="empty">Nothing waiting. Everything paid for has been handed over.</div></td></tr>
-                ) : readyToHandOver.map((o) => (
-                  <tr key={o.id}>
-                    <td>
-                      <strong style={{ fontWeight: 500 }}>{o.customer_name}</strong>
-                      <div style={{ fontSize: '0.75rem', color: 'var(--ink-faint)' }}>{o.customer_email ?? o.reference}</div>
-                    </td>
-                    <td>{o.stock_items ? `${o.stock_items.name} · ${o.stock_items.size}` : '—'}</td>
-                    <td>{o.quantity}</td>
-                    <td style={{ fontSize: '0.8rem' }}>{new Date(o.ordered_at).toLocaleDateString('en-AU')}</td>
-                    <td><button className="btn-mini" onClick={() => handOver(o.id)}>Hand over</button></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-
-          <div className="card">
-            <div className="card-head"><h2>Waiting on stock</h2></div>
-            <table>
-              <thead><tr><th>Who</th><th>Item</th><th>Qty</th><th>On hand</th><th>Ordered</th></tr></thead>
-              <tbody>
-                {waitingOnStock.length === 0 ? (
-                  <tr><td colSpan={5}><div className="empty">Nobody is waiting on stock.</div></td></tr>
-                ) : waitingOnStock.map((o) => {
-                  const s = o.stock_item_id ? byId.get(o.stock_item_id) : null;
-                  return (
-                    <tr key={o.id}>
-                      <td>
-                        <strong style={{ fontWeight: 500 }}>{o.customer_name}</strong>
-                        <div style={{ fontSize: '0.75rem', color: 'var(--ink-faint)' }}>{o.customer_email ?? o.reference}</div>
-                      </td>
-                      <td>{o.stock_items ? `${o.stock_items.name} · ${o.stock_items.size}` : '—'}</td>
-                      <td>{o.quantity}</td>
-                      <td><span className="pill pill-out">{s?.on_hand ?? 0}</span></td>
-                      <td style={{ fontSize: '0.8rem' }}>{new Date(o.ordered_at).toLocaleDateString('en-AU')}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </>
-      )}
-
       {/* ---------------- Restock ---------------- */}
       {section === 'restock' && (
         <div className="card">
@@ -429,57 +420,92 @@ export default function TrackerSection({
       {section === 'orders' && (
         <div className="card">
           <div className="card-head">
-            <h2>All orders</h2>
+            <h2>Orders</h2>
             <button className="btn-solid" onClick={() => setModal('order')}>Add order</button>
           </div>
-          <div className="filters">
-            <input placeholder="Search by name or item" value={orderSearch} onChange={(e) => setOrderSearch(e.target.value)} />
-            <select value={orderFilter} onChange={(e) => setOrderFilter(e.target.value)}>
-              <option value="">All orders</option>
-              <option value="pending">Unpaid</option>
-              <option value="paid">Paid, not handed over</option>
-              <option value="distributed">Handed over</option>
-            </select>
+
+          <div className="chip-row">
+            {CHIPS.map((c) => (
+              <button
+                key={c.key}
+                type="button"
+                className="chip"
+                data-active={orderChip === c.key}
+                onClick={() => setOrderChip(c.key)}
+              >
+                {c.label} <span className="chip-count">{orderCounts[c.key]}</span>
+              </button>
+            ))}
           </div>
-          <table>
-            <thead>
-              <tr><th>Who</th><th>Item</th><th>Qty</th><th>Total</th><th>Payment</th><th>Handover</th><th>Source</th><th></th></tr>
-            </thead>
-            <tbody>
-              {visibleOrders.length === 0 ? (
-                <tr><td colSpan={8}><div className="empty">No orders match.</div></td></tr>
-              ) : visibleOrders.map((o) => (
-                <tr key={o.id}>
-                  <td>
-                    <strong style={{ fontWeight: 500 }}>{o.customer_name}</strong>
-                    <div style={{ fontSize: '0.75rem', color: 'var(--ink-faint)' }}>{o.customer_email ?? o.reference}</div>
-                  </td>
-                  <td>{o.stock_items ? `${o.stock_items.name} · ${o.stock_items.size}` : '—'}</td>
-                  <td>{o.quantity}</td>
-                  <td>{money(o.unit_price * o.quantity)}</td>
-                  <td>{o.payment_status === 'paid'
-                    ? <span className="pill pill-ok">Paid</span>
-                    : <span className="pill pill-out">Unpaid</span>}</td>
-                  <td>{o.distributed_at
-                    ? <span style={{ fontSize: '0.78rem' }}>{new Date(o.distributed_at).toLocaleDateString('en-AU')}</span>
-                    : <span className="pill pill-grey">Not yet</span>}</td>
-                  <td><span className="pill pill-grey">{o.source === 'wix' ? 'Wix' : 'Manual'}</span></td>
-                  <td style={{ display: 'flex', gap: 6 }}>
-                    {o.payment_status === 'pending' && (
-                      <button className="btn-mini" onClick={() => markPaid(o.id)}>Mark paid</button>
-                    )}
-                    {o.payment_status === 'paid' && !o.distributed_at && (
-                      <button className="btn-mini" onClick={() => handOver(o.id)}>Hand over</button>
-                    )}
-                    {o.distributed_at && permissions.can_undo_handover && (
-                      <button className="btn-mini" onClick={() => undoHandover(o.id)}>Undo</button>
-                    )}
-                    <button className="btn-mini" onClick={() => removeOrder(o.id)}>Remove</button>
-                  </td>
-                </tr>
+
+          <div className="filters">
+            <input placeholder="Search by name or email" value={orderSearch} onChange={(e) => setOrderSearch(e.target.value)} />
+          </div>
+
+          {orderChip === 'ready' ? (
+            <div className="order-groups">
+              {readyGroups.length === 0 ? (
+                <div className="empty">Nothing ready to hand over.</div>
+              ) : readyGroups.map((g) => (
+                <div className="order-group" key={g.key}>
+                  <div className="order-group-who">
+                    <strong>{g.name}</strong>
+                    <div>{g.email ?? '—'}</div>
+                  </div>
+                  <div className="order-group-items">
+                    {g.items.map((i) => (
+                      <div key={i.id}>{i.quantity} × {i.stock_items ? `${i.stock_items.name} · ${i.stock_items.size}` : '—'}</div>
+                    ))}
+                  </div>
+                  <button className="btn-mini" onClick={() => handOverGroup(g.items.map((i) => i.id))}>
+                    {g.items.length > 1 ? 'Hand over all' : 'Hand over'}
+                  </button>
+                </div>
               ))}
-            </tbody>
-          </table>
+            </div>
+          ) : (
+            <table>
+              <thead>
+                <tr><th>Who</th><th>Item</th><th>Qty</th><th>Status</th><th></th></tr>
+              </thead>
+              <tbody>
+                {visibleOrders.length === 0 ? (
+                  <tr><td colSpan={5}><div className="empty">No orders match.</div></td></tr>
+                ) : visibleOrders.map(({ order: o, state }) => (
+                  <tr key={o.id}>
+                    <td>
+                      <strong style={{ fontWeight: 500 }}>{o.customer_name}</strong>
+                      <div style={{ fontSize: '0.75rem', color: 'var(--ink-faint)' }}>{o.customer_email ?? o.reference}</div>
+                    </td>
+                    <td>{o.stock_items ? `${o.stock_items.name} · ${o.stock_items.size}` : '—'}</td>
+                    <td>{o.quantity}</td>
+                    <td>
+                      {state === 'unpaid' && <span className="pill pill-out">Unpaid</span>}
+                      {state === 'ready' && <span className="pill pill-ok">Ready</span>}
+                      {state === 'waiting' && <span className="pill pill-low">Waiting on stock</span>}
+                      {state === 'done' && <span className="pill pill-grey">Done</span>}
+                    </td>
+                    <td>
+                      {state === 'unpaid' && (
+                        <button className="btn-mini" onClick={() => markPaid(o.id)}>Mark paid</button>
+                      )}
+                      {state === 'ready' && (
+                        <button className="btn-mini" onClick={() => handOverGroup([o.id])}>Hand over</button>
+                      )}
+                      {state === 'waiting' && (
+                        <span style={{ fontSize: '0.78rem', color: 'var(--ink-faint)' }}>
+                          {(o.stock_item_id ? byId.get(o.stock_item_id)?.on_hand : 0) ?? 0} in stock
+                        </span>
+                      )}
+                      {state === 'done' && permissions.can_undo_handover && (
+                        <button className="btn-mini btn-quiet" onClick={() => undoHandover(o.id)}>Undo</button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
         </div>
       )}
 
