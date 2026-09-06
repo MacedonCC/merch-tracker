@@ -51,6 +51,17 @@ export async function middleware(request: NextRequest) {
   return response;
 }
 
+// Excludes public static assets (images, icons, fonts) as well as the
+// Next.js internals and the Wix cron route. This isn't just tidiness:
+// the club logo on the login page renders via next/image, and Vercel's
+// Image Optimization fetches a "local" /public asset like /mcc-logo.jpg
+// with an HTTP request back to this same deployment — a request that,
+// unlike the browser's own page navigation, carries no session cookie.
+// Before this exclusion, that request hit the "no user -> redirect to
+// /login" rule above and got a 307 instead of the image, so the
+// optimizer had nothing to transform and the <img> came back broken —
+// only ever visible on /login itself, since that's the one page an
+// unauthenticated visitor (and so an uncookied asset fetch) ever loads.
 export const config = {
-  matcher: ['/((?!_next/static|_next/image|favicon.ico|api/wix-sync).*)'],
+  matcher: ['/((?!_next/static|_next/image|favicon.ico|api/wix-sync|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)'],
 };

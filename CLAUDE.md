@@ -37,6 +37,19 @@ There is no test suite in this repo.
 - `middleware.ts` redirects unauthenticated visitors to `/login` for every
   route except `/login` and `/auth/*`. This is a UX convenience, not a
   security boundary.
+- The matcher must also exclude public static assets (images, icons —
+  currently done by extension in `config.matcher`, not just the literal
+  `favicon.ico`). This isn't just tidiness: Vercel's Image Optimization
+  fetches a "local" `/public` asset with an uncookied HTTP request back
+  to this same deployment, so if that path isn't excluded, an
+  unauthenticated fetch for it gets redirected to `/login` like any
+  other protected route — the optimizer then has nothing to transform
+  and the image comes back broken in the browser. This only ever showed
+  up on `/login` itself (the club logo), since that's the one page an
+  unauthenticated visitor — and so an uncookied asset fetch — ever
+  loads; every other page's images are fetched by an already-signed-in
+  session. Any new file added to `public/` needs its extension covered
+  by the matcher, or to be added explicitly.
 - Actual access control is `members` table membership + `role` column
   (`admin` | `helper`), enforced two ways:
   - **Postgres RLS**, via `is_committee_member()` / `is_admin()` SQL

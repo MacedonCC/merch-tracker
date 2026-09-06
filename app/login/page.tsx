@@ -73,7 +73,7 @@ export default function LoginPage() {
           className="login-logo"
           priority
         />
-        <h1>Macedon Cricket Club</h1>
+        <h1>MCC Clothing</h1>
         <p className="login-subtitle">Merchandise Tracker</p>
         <p>Committee access only. We&apos;ll email you a sign-in link.</p>
 
