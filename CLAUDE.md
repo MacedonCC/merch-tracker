@@ -27,6 +27,8 @@ There is no test suite in this repo.
   asked.
 - Never edit a migration file that has already been applied — write a new
   migration instead (see Schema drift below).
+- After writing a migration, run `supabase db push` to apply it, then
+  commit and push. Don't wait to be asked.
 
 ## Architecture
 
