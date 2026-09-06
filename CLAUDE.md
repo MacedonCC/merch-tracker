@@ -97,6 +97,16 @@ split the old single "orders full access" policy into separate
 select/insert/update policies open to any committee member and a
 delete policy gated on `is_admin()`.
 
+`orders.handed_over_by` / `handover_note` (both nullable,
+`supabase/migrations/20260906000003_handover_details.sql`) are only
+ever written together with `distributed_at` — `TrackerSection.tsx`'s
+handover modal (opened by "Hand over", "Hand over all", and "Edit
+handover" on a Done row) sets all three at once, and `undoHandover()`
+clears all three at once. Neither has its own trigger: setting them
+alongside a non-null `distributed_at` (fresh handover or a correction)
+needs no permission, same as `check_order_update()` already allows;
+only clearing `distributed_at` back to null is gated.
+
 Both look up the caller by `auth.jwt() ->> 'email'` against `members`, the
 same pattern `is_admin()` uses. When adding a new permission-gated field,
 extend the relevant trigger — adding it only to the RLS policy won't give

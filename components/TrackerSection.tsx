@@ -85,6 +85,8 @@ interface OrderRow {
   unit_price: number;
   payment_status: 'pending' | 'paid' | 'refunded';
   distributed_at: string | null;
+  handed_over_by: string | null;
+  handover_note: string | null;
   source: 'manual' | 'wix';
   ordered_at: string;
   notes: string | null;
@@ -93,6 +95,8 @@ interface OrderRow {
 
 const money = (n: number) =>
   new Intl.NumberFormat('en-AU', { style: 'currency', currency: 'AUD' }).format(n);
+
+const formatDate = (iso: string) => new Date(iso).toLocaleDateString('en-AU');
 
 // Each order has two independent facts — paid or not, handed over or
 // not — but the four things a helper actually cares about collapse
@@ -160,8 +164,9 @@ export default function TrackerSection({
   const [stock, setStock] = useState<StockRow[]>([]);
   const [orders, setOrders] = useState<OrderRow[]>([]);
   const [loading, setLoading] = useState(true);
-  const [modal, setModal] = useState<'item' | 'order' | 'edit' | null>(null);
+  const [modal, setModal] = useState<'item' | 'order' | 'edit' | 'handover' | null>(null);
   const [editing, setEditing] = useState<StockRow | null>(null);
+  const [handoverForm, setHandoverForm] = useState<{ ids: string[]; date: string; initials: string; note: string } | null>(null);
   const [message, setMessage] = useState('');
 
   const [search, setSearch] = useState('');
@@ -281,18 +286,59 @@ export default function TrackerSection({
     load();
   }
 
-  async function handOverGroup(ids: string[]) {
+  // Opens the handover modal rather than writing straight away — for a
+  // fresh handover (no `existing`) it defaults to today and whatever
+  // initials were last used this session; for "Edit handover" on an
+  // already-done order it pre-fills from that order's own values so a
+  // mistake can be corrected without an undo/redo round trip.
+  function openHandoverModal(ids: string[], existing?: OrderRow) {
+    const today = new Date().toISOString().slice(0, 10);
+    let remembered = '';
+    try { remembered = sessionStorage.getItem('handoverInitials') ?? ''; } catch {}
+
+    setHandoverForm({
+      ids,
+      date: existing?.distributed_at ? existing.distributed_at.slice(0, 10) : today,
+      initials: existing?.handed_over_by ?? remembered,
+      note: existing?.handover_note ?? '',
+    });
+    setModal('handover');
+  }
+
+  async function saveHandover(form: HTMLFormElement) {
+    if (!handoverForm) return;
+    const f = new FormData(form);
+    const date = String(f.get('date') ?? '').trim();
+    const initials = String(f.get('initials') ?? '').trim();
+    const note = String(f.get('note') ?? '').trim() || null;
+    if (!date) return flash('Date is required.');
+    if (!initials) return flash('Initials are required.');
+
+    try { sessionStorage.setItem('handoverInitials', initials); } catch {}
+
     const { error } = await supabase
       .from('orders')
-      .update({ distributed_at: new Date().toISOString() })
-      .in('id', ids);
+      .update({
+        // Noon rather than midnight so the chosen calendar date can't
+        // shift a day either way once toLocaleDateString re-renders it
+        // in the viewer's own timezone.
+        distributed_at: new Date(`${date}T12:00:00`).toISOString(),
+        handed_over_by: initials,
+        handover_note: note,
+      })
+      .in('id', handoverForm.ids);
     if (error) return flash(error.message);
-    flash(ids.length > 1 ? `Handed over ${ids.length} items.` : 'Handed over.');
+    setModal(null);
+    setHandoverForm(null);
+    flash(handoverForm.ids.length > 1 ? `Handed over ${handoverForm.ids.length} items.` : 'Handed over.');
     load();
   }
 
   async function undoHandover(id: string) {
-    const { error } = await supabase.from('orders').update({ distributed_at: null }).eq('id', id);
+    const { error } = await supabase
+      .from('orders')
+      .update({ distributed_at: null, handed_over_by: null, handover_note: null })
+      .eq('id', id);
     if (error) return flash(error.message);
     flash('Handover reversed.');
     load();
@@ -512,17 +558,20 @@ export default function TrackerSection({
                   <div className="order-group-items">
                     {g.items.map((i) => (
                       <div key={i.id} className="order-group-item">
-                        <span>{i.quantity} × {i.stock_items ? `${i.stock_items.name} · ${i.stock_items.size}` : '—'}</span>
+                        <span>
+                          {i.quantity} × {i.stock_items ? `${i.stock_items.name} · ${i.stock_items.size}` : '—'}
+                          <span style={{ color: 'var(--ink-faint)', fontSize: '0.75rem', marginLeft: 8 }}>{formatDate(i.ordered_at)}</span>
+                        </span>
                         <RowMenu
                           actions={[
-                            { label: 'Hand over', onClick: () => handOverGroup([i.id]) },
+                            { label: 'Hand over', onClick: () => openHandoverModal([i.id]) },
                             ...(isAdmin ? [{ label: 'Remove', onClick: () => removeOrder(i.id) }] : []),
                           ]}
                         />
                       </div>
                     ))}
                   </div>
-                  <button className="btn-mini" onClick={() => handOverGroup(g.items.map((i) => i.id))}>
+                  <button className="btn-mini" onClick={() => openHandoverModal(g.items.map((i) => i.id))}>
                     {g.items.length > 1 ? 'Hand over all' : 'Hand over'}
                   </button>
                 </div>
@@ -531,11 +580,11 @@ export default function TrackerSection({
           ) : (
             <table>
               <thead>
-                <tr><th>Who</th><th>Item</th><th>Qty</th><th>Status</th><th></th><th></th></tr>
+                <tr><th>Who</th><th>Item</th><th>Qty</th><th>Ordered</th><th>Status</th><th></th><th></th></tr>
               </thead>
               <tbody>
                 {visibleOrders.length === 0 ? (
-                  <tr><td colSpan={6}><div className="empty">No orders match.</div></td></tr>
+                  <tr><td colSpan={7}><div className="empty">No orders match.</div></td></tr>
                 ) : visibleOrders.map(({ order: o, state }) => (
                   <tr key={o.id}>
                     <td>
@@ -544,18 +593,32 @@ export default function TrackerSection({
                     </td>
                     <td>{o.stock_items ? `${o.stock_items.name} · ${o.stock_items.size}` : '—'}</td>
                     <td>{o.quantity}</td>
+                    <td style={{ fontSize: '0.85rem' }}>{formatDate(o.ordered_at)}</td>
                     <td>
                       {state === 'unpaid' && <span className="pill pill-out">Unpaid</span>}
                       {state === 'ready' && <span className="pill pill-ok">Ready</span>}
                       {state === 'waiting' && <span className="pill pill-low">Waiting on stock</span>}
-                      {state === 'done' && <span className="pill pill-grey">Done</span>}
+                      {state === 'done' && (
+                        <>
+                          <span className="pill pill-grey">Done</span>
+                          <div style={{ fontSize: '0.75rem', color: 'var(--ink-faint)', marginTop: 4 }}>
+                            {o.handed_over_by && <>by {o.handed_over_by} </>}
+                            {o.distributed_at && <>· {formatDate(o.distributed_at)}</>}
+                          </div>
+                          {o.handover_note && (
+                            <div style={{ fontSize: '0.75rem', color: 'var(--ink-faint)', fontStyle: 'italic', marginTop: 2 }}>
+                              “{o.handover_note}”
+                            </div>
+                          )}
+                        </>
+                      )}
                     </td>
                     <td>
                       {state === 'unpaid' && (
                         <button className="btn-mini" onClick={() => markPaid(o.id)}>Mark paid</button>
                       )}
                       {state === 'ready' && (
-                        <button className="btn-mini" onClick={() => handOverGroup([o.id])}>Hand over</button>
+                        <button className="btn-mini" onClick={() => openHandoverModal([o.id])}>Hand over</button>
                       )}
                       {state === 'waiting' && (
                         <span style={{ fontSize: '0.78rem', color: 'var(--ink-faint)' }}>
@@ -567,9 +630,12 @@ export default function TrackerSection({
                       )}
                     </td>
                     <td>
-                      {isAdmin && (
-                        <RowMenu actions={[{ label: 'Remove', onClick: () => removeOrder(o.id) }]} />
-                      )}
+                      <RowMenu
+                        actions={[
+                          ...(state === 'done' ? [{ label: 'Edit handover', onClick: () => openHandoverModal([o.id], o) }] : []),
+                          ...(isAdmin ? [{ label: 'Remove', onClick: () => removeOrder(o.id) }] : []),
+                        ]}
+                      />
                     </td>
                   </tr>
                 ))}
@@ -627,6 +693,24 @@ export default function TrackerSection({
             <div className="modal-actions">
               <button type="button" onClick={() => setModal(null)}>Cancel</button>
               <button type="submit" className="btn-solid">Save</button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {modal === 'handover' && handoverForm && (
+        <div className="overlay" onClick={(e) => e.target === e.currentTarget && setModal(null)}>
+          <form className="modal" onSubmit={(e) => { e.preventDefault(); saveHandover(e.currentTarget); }}>
+            <h3>{handoverForm.ids.length > 1 ? `Hand over ${handoverForm.ids.length} items` : 'Hand over'}</h3>
+            <div className="field"><label>Date handed over</label>
+              <input name="date" type="date" defaultValue={handoverForm.date} autoFocus /></div>
+            <div className="field"><label>Initials</label>
+              <input name="initials" defaultValue={handoverForm.initials} placeholder="e.g. AB" required /></div>
+            <div className="field"><label>Comments (optional)</label>
+              <textarea name="note" rows={3} defaultValue={handoverForm.note}></textarea></div>
+            <div className="modal-actions">
+              <button type="button" onClick={() => setModal(null)}>Cancel</button>
+              <button type="submit" className="btn-solid">Confirm</button>
             </div>
           </form>
         </div>
