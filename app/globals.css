@@ -199,9 +199,9 @@ td.perm-cell input { width: auto; }
 
 .avatar-wrap { position: relative; }
 .avatar {
-  width: 34px; height: 34px; padding: 0; border-radius: 50%;
+  width: 51px; height: 51px; padding: 0; border-radius: 50%;
   background: var(--accent); border: 1px solid var(--accent);
-  color: #fff; font-size: 0.78rem; font-weight: 600;
+  color: #fff; font-size: 1.17rem; font-weight: 600;
   display: flex; align-items: center; justify-content: center;
 }
 .avatar:hover { background: #1c54c0; }
