@@ -181,6 +181,21 @@ td.perm-cell input { width: auto; }
 }
 .avatar-menu-item:hover { background: var(--wash); }
 
+/* Google's sign-in button branding guidelines require the logo and
+   colours to be used unmodified on a plain white/dark-text button,
+   even inside an otherwise dark UI. */
+.btn-google {
+  display: flex; align-items: center; justify-content: center; gap: 10px;
+  background: #fff; border: 1px solid #dadce0; border-radius: var(--radius);
+  color: #3c4043; font-weight: 500; font-size: 0.87rem; padding: 9px 14px;
+}
+.btn-google:hover { background: #f8f9fa; }
+.btn-google:disabled { opacity: 0.7; }
+
+.divider { display: flex; align-items: center; gap: 10px; margin: 1rem 0; }
+.divider::before, .divider::after { content: ''; flex: 1 1 auto; height: 1px; background: var(--line); }
+.divider span { font-size: 0.75rem; color: var(--ink-faint); text-transform: uppercase; letter-spacing: 0.04em; }
+
 .login-wrap { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 1.5rem; }
 .login-card { background: var(--paper); border: 1px solid var(--line); border-radius: 12px; padding: 2rem; width: 100%; max-width: 380px; }
 .login-card h1 { font-size: 1.2rem; font-weight: 600; margin-bottom: 0.35rem; }

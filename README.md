@@ -112,6 +112,22 @@ Without this, the sign-in links won't work.
 Visit your URL, enter the email you put in the schema file, and click the link
 that arrives in your inbox. You're in.
 
+### 9. (Optional) Enable "Continue with Google"
+
+The login page has a Google button, but it does nothing until you turn the
+provider on:
+
+1. In [Google Cloud Console](https://console.cloud.google.com/), create an
+   OAuth 2.0 Client ID (Web application). Add
+   `https://YOUR-PROJECT-REF.supabase.co/auth/v1/callback` as an authorised
+   redirect URI — that's Supabase's callback, not this app's.
+2. Supabase → **Authentication** → **Providers** → **Google**. Turn it on and
+   paste in the Client ID and Client Secret.
+
+Someone who signs in with a Google account not on the `members` table still
+gets "Not on the committee list", the same as with a magic link — an admin
+still has to add them first.
+
 ---
 
 ## Adding committee members
