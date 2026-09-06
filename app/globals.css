@@ -143,7 +143,6 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1
 }
 .tile h3 { font-size: 1.2rem; font-weight: 700; margin: 4px 0 14px; }
 .tile-icon { display: flex; justify-content: center; margin-bottom: 14px; color: var(--accent); }
-.tile-icon svg { width: 40px; height: 40px; }
 .tile p { font-size: 0.82rem; color: var(--ink-soft); margin-bottom: 14px; flex: 1 1 auto; }
 .tile-footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .tile-label { font-size: 0.75rem; color: var(--ink-faint); }
