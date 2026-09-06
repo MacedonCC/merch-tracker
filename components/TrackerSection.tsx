@@ -513,9 +513,12 @@ export default function TrackerSection({
                     {g.items.map((i) => (
                       <div key={i.id} className="order-group-item">
                         <span>{i.quantity} × {i.stock_items ? `${i.stock_items.name} · ${i.stock_items.size}` : '—'}</span>
-                        {isAdmin && (
-                          <RowMenu actions={[{ label: 'Remove', onClick: () => removeOrder(i.id) }]} />
-                        )}
+                        <RowMenu
+                          actions={[
+                            { label: 'Hand over', onClick: () => handOverGroup([i.id]) },
+                            ...(isAdmin ? [{ label: 'Remove', onClick: () => removeOrder(i.id) }] : []),
+                          ]}
+                        />
                       </div>
                     ))}
                   </div>
