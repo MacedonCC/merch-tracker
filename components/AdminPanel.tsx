@@ -46,8 +46,9 @@ export default function AdminPanel({
 
   async function removeMember(m: MemberRow) {
     if (!confirm(`Remove ${m.email} from the committee list?`)) return;
-    const { error } = await supabase.from('members').delete().eq('id', m.id);
-    if (error) return flash(error.message);
+    const res = await fetch(`/api/members/${m.id}`, { method: 'DELETE' });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) return flash(body.error ?? 'Failed to remove member.');
     flash('Member removed.');
     reload();
   }
@@ -57,14 +58,26 @@ export default function AdminPanel({
     const email = String(f.get('email') ?? '').trim().toLowerCase();
     if (!email) return flash('Email is required.');
 
-    const { error } = await supabase.from('members').insert({
-      email,
-      full_name: String(f.get('full_name') ?? '').trim() || null,
-      role: String(f.get('role') ?? 'helper'),
+    const res = await fetch('/api/members', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email,
+        full_name: String(f.get('full_name') ?? '').trim() || null,
+        role: String(f.get('role') ?? 'helper'),
+      }),
     });
-    if (error) return flash(error.message);
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) return flash(body.error ?? 'Failed to add member.');
+
     setModal(false);
-    flash('Member added.');
+    if (body.alreadyRegistered) {
+      flash(`${email} added — they already had an account and can sign in now.`);
+    } else if (body.invited) {
+      flash(`${email} added — an invite email has been sent.`);
+    } else {
+      flash(`${email} added, but the invite email failed to send${body.inviteError ? `: ${body.inviteError}` : '.'}`);
+    }
     reload();
   }
 
