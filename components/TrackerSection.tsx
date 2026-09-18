@@ -1,15 +1,40 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createClient } from '@/lib/supabase-client';
 import type { MemberPermissions } from '@/lib/member';
+
+// The nearest ancestor that would clip an overflowing child (the
+// Orders card has overflow: hidden), or null if only the viewport does.
+function clippingAncestor(el: HTMLElement): HTMLElement | null {
+  for (let p = el.parentElement; p; p = p.parentElement) {
+    if (getComputedStyle(p).overflowY !== 'visible') return p;
+  }
+  return null;
+}
 
 // A small "..." menu for a row's secondary actions — Remove today,
 // anything else later — kept separate from the one visible primary
 // action per row (Mark paid / Hand over / Undo).
 function RowMenu({ actions }: { actions: { label: string; onClick: () => void }[] }) {
   const [open, setOpen] = useState(false);
+  const [dropUp, setDropUp] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  // Opens downwards unless that would run past the clipping container
+  // (or the viewport) and there's more room above — so the last rows'
+  // menus flip up instead of being cut off. Measured before paint, so
+  // there's no visible jump.
+  useLayoutEffect(() => {
+    if (!open || !ref.current || !menuRef.current) return;
+    const btn = ref.current.getBoundingClientRect();
+    const menuHeight = menuRef.current.getBoundingClientRect().height + 4;
+    const clip = clippingAncestor(ref.current)?.getBoundingClientRect();
+    const spaceBelow = Math.min(clip?.bottom ?? Infinity, window.innerHeight) - btn.bottom;
+    const spaceAbove = btn.top - Math.max(clip?.top ?? -Infinity, 0);
+    setDropUp(menuHeight > spaceBelow && spaceAbove > spaceBelow);
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -35,7 +60,7 @@ function RowMenu({ actions }: { actions: { label: string; onClick: () => void }[
         ⋯
       </button>
       {open && (
-        <div className="row-menu" role="menu">
+        <div className="row-menu" role="menu" ref={menuRef} data-up={dropUp}>
           {actions.map((a) => (
             <button
               key={a.label}
@@ -97,6 +122,15 @@ const money = (n: number) =>
   new Intl.NumberFormat('en-AU', { style: 'currency', currency: 'AUD' }).format(n);
 
 const formatDate = (iso: string) => new Date(iso).toLocaleDateString('en-AU');
+
+// Item name with its size as a small trailing pill, so a long product
+// name doesn't swallow the size.
+const itemLabel = (item: { name: string; size: string } | null | undefined) =>
+  item ? (
+    <>
+      {item.name} <span className="size-pill">{item.size}</span>
+    </>
+  ) : '—';
 
 // ---- Stock matrix ---------------------------------------------------
 // The Stock page is one row per product and one column per size, so the
@@ -726,8 +760,15 @@ export default function TrackerSection({
                         </td>
                       )}
                       <td className="orders-qty">{i.quantity}</td>
-                      <td>{i.stock_items ? `${i.stock_items.name} · ${i.stock_items.size}` : '—'}</td>
-                      <td className="orders-date">{formatDate(i.ordered_at)}</td>
+                      <td className="orders-item">{itemLabel(i.stock_items)}</td>
+                      {/* Blank when it repeats the row above — a group's
+                          items usually share one order date. A different
+                          date (the customer ordered twice) still shows. */}
+                      <td className="orders-date">
+                        {n > 0 && formatDate(g.items[n - 1].ordered_at) === formatDate(i.ordered_at)
+                          ? null
+                          : formatDate(i.ordered_at)}
+                      </td>
                       {n === 0 && (
                         <td className="orders-action order-group-action" rowSpan={g.items.length}>
                           <button className="btn-mini" onClick={() => openHandoverModal(g.items.map((x) => x.id))}>
@@ -758,7 +799,7 @@ export default function TrackerSection({
                       <div>{o.customer_email ?? o.reference}</div>
                     </td>
                     <td className="orders-qty">{o.quantity}</td>
-                    <td>{o.stock_items ? `${o.stock_items.name} · ${o.stock_items.size}` : '—'}</td>
+                    <td className="orders-item">{itemLabel(o.stock_items)}</td>
                     <td className="orders-date">{formatDate(o.ordered_at)}</td>
                     <td>
                       {state === 'unpaid' && <span className="pill pill-out">Unpaid</span>}

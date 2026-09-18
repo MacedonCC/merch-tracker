@@ -173,32 +173,51 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1
 .chip-count { font-size: 0.72rem; opacity: 0.85; }
 
 /* ---------------- Orders: one column grid for every chip ----------------
-   Name | Qty | Item | Ordered | (Status) | action | ⋯. The name column
-   never wraps, so names and emails stay on one line and push the item
-   column right; qty and dates are right-aligned to form clean edges. */
-.orders-table th, .orders-table td { padding-left: 0.85rem; padding-right: 0.85rem; }
+   Name | Qty | Item | Ordered | (Status) | action | ⋯. Everything is
+   centred except Name, which never wraps so names and emails stay on
+   one line and push the item column right. */
+.orders-table th, .orders-table td {
+  padding: 0.45rem 0.85rem; text-align: center;
+}
+.orders-table .orders-who { text-align: left; }
+.orders-table thead th {
+  font-size: 0.68rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em;
+  color: var(--ink); border-bottom: 2px solid var(--line-strong);
+}
 .orders-who { white-space: nowrap; width: 15rem; }
 .orders-who strong { font-weight: 500; }
-.orders-who div { font-size: 0.75rem; color: var(--ink-faint); }
-.orders-qty { width: 3rem; text-align: right; font-variant-numeric: tabular-nums; }
-.orders-table th.orders-qty, .orders-table th.orders-date { text-align: right; }
-.orders-date { text-align: right; white-space: nowrap; font-size: 0.85rem; font-variant-numeric: tabular-nums; }
+.orders-who div { font-size: 0.75rem; color: var(--ink-faint); line-height: 1.35; }
+.orders-qty { width: 3rem; font-variant-numeric: tabular-nums; }
+.orders-date { white-space: nowrap; font-size: 0.85rem; font-variant-numeric: tabular-nums; }
 .orders-action { width: 1%; white-space: nowrap; }
-.orders-menu { width: 2.75rem; text-align: right; }
-.orders-table .orders-menu { padding-left: 0; padding-right: 0.6rem; }
+.orders-menu { width: 2.75rem; }
+.orders-table .orders-menu { padding-left: 0; padding-right: 0.4rem; }
+
+.size-pill {
+  display: inline-block; margin-left: 4px; padding: 0 7px; border-radius: 999px;
+  font-size: 0.7rem; font-weight: 600; line-height: 1.6; white-space: nowrap;
+  color: var(--ink-soft); background: var(--wash); border: 1px solid var(--line);
+  vertical-align: 1px;
+}
+
+/* Row highlighting is painted on cells, not the <tr>: a row's
+   background would also fill a rowspan cell's full height, lighting up
+   a whole customer block instead of the one line being acted on. */
+.orders-table tbody tr:hover { background: none; }
+.orders-table tbody tr:hover > td:not([rowspan]) { background: rgba(255, 255, 255, 0.05); }
 
 /* Ready: each customer is a <tbody>. Items inside a customer get a
-   faint divider; the line between customers is the strong one, and a
-   tinted left edge on the spanning name cell marks the block. */
+   faint divider; the line between customers is the strong one, the
+   customer's first row is lightly tinted to mark where it starts, and
+   a tinted left edge on the spanning name cell marks the block. */
 .order-group td { border-bottom-color: rgba(255, 255, 255, 0.035); }
 .order-group tr:last-child td,
 .order-group td[rowspan] { border-bottom: none; }
 .order-group + .order-group tr:first-child > td { border-top: 1px solid var(--line-strong); }
+.order-group tr:first-child > td:not([rowspan]) { background: rgba(255, 255, 255, 0.025); }
 .order-group-who, .order-group-action { vertical-align: top; }
 .order-group-who { box-shadow: inset 3px 0 0 var(--accent-soft); }
 .order-group:hover .order-group-who { box-shadow: inset 3px 0 0 var(--accent); }
-.order-group tr:hover { background: none; }
-.order-group:hover td { background: rgba(255, 255, 255, 0.02); }
 
 @media (max-width: 640px) {
   .orders-who { white-space: normal; }
@@ -220,6 +239,7 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1
   background: var(--paper); border: 1px solid var(--line); border-radius: var(--radius);
   min-width: 140px; overflow: hidden; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
 }
+.row-menu[data-up="true"] { top: auto; bottom: calc(100% + 4px); }
 .row-menu-item {
   display: block; width: 100%; text-align: left;
   padding: 0.5rem 0.8rem; font-size: 0.82rem;
