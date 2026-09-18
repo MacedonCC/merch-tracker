@@ -216,6 +216,80 @@ td.perm-cell input { width: auto; }
 .bar { width: 70px; height: 5px; background: var(--wash); border-radius: 3px; display: inline-block; vertical-align: middle; margin-left: 8px; }
 .bar i { display: block; height: 5px; border-radius: 3px; }
 
+/* ---------------- Stock: one expandable card per product ----------------
+   Collapsed, a card answers "how many, what does it cost, is anything
+   wrong, which sizes" without opening anything. Expanded, it holds the
+   same per-size table the flat list used, so it spans the full grid
+   width rather than squeezing eight columns into a third of a row. */
+.stock-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 14px; padding: 1.15rem;
+}
+.stock-card {
+  display: flex; flex-direction: column; gap: 10px;
+  background-color: var(--wash); background-image: var(--sheen);
+  border: 1px solid var(--line); border-radius: 10px; padding: 1rem 1.1rem;
+  box-shadow: var(--shine-shadow);
+}
+.stock-card.is-open { grid-column: 1 / -1; border-color: var(--line-strong); }
+
+.stock-card-head {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 10px;
+  width: 100%; padding: 0; text-align: left;
+  background: none; border: none; box-shadow: none; color: inherit; cursor: pointer;
+}
+.stock-card-head:hover { background: none; }
+.stock-card-head:hover .stock-card-name { color: var(--accent); }
+.stock-card-title { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.stock-card-name { font-size: 1rem; font-weight: 600; letter-spacing: -0.01em; }
+.stock-card-cat {
+  font-size: 0.7rem; font-weight: 700; letter-spacing: 0.06em;
+  text-transform: uppercase; color: var(--ink-faint);
+}
+.stock-card-chevron {
+  font-size: 1.15rem; line-height: 1; color: var(--ink-faint); flex-shrink: 0;
+  transition: transform 0.15s ease; transform-origin: 50% 50%;
+}
+.stock-card-chevron[data-open="true"] { transform: rotate(90deg); color: var(--accent); }
+
+.stock-card-figures { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.stock-card-total { font-size: 0.76rem; color: var(--ink-faint); }
+.stock-card-total strong {
+  font-size: 1.6rem; font-weight: 700; letter-spacing: -0.02em;
+  color: var(--ink); margin-right: 5px;
+}
+.stock-card-price { font-size: 0.82rem; color: var(--ink-soft); }
+.stock-card-status { display: flex; }
+
+/* The size strip: the bit that makes a collapsed card worth reading —
+   every size, its count, and its own status colour. */
+.size-strip { display: flex; flex-wrap: wrap; gap: 5px; }
+.size-chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 2px 7px; border-radius: 6px;
+  font-size: 0.72rem; font-weight: 600; line-height: 1.5;
+  border: 1px solid transparent; background-image: var(--sheen);
+}
+.size-chip-size { opacity: 0.8; font-weight: 500; }
+.size-chip-count { font-variant-numeric: tabular-nums; }
+.size-chip-ok { background-color: var(--accent-soft); color: var(--accent); }
+.size-chip-low { background-color: var(--warn-soft); color: var(--warn); }
+.size-chip-out { background-color: var(--alert-soft); color: var(--alert); }
+.size-chip-oversold { background-color: var(--alert-soft); color: var(--alert); border-color: var(--alert); }
+
+/* Sizes outside an active status filter stay visible — the card's
+   totals only add up if you can still see them — but recede. */
+.is-dimmed { opacity: 0.35; }
+
+.stock-card-detail { margin: 4px -1.1rem -1rem; border-top: 1px solid var(--line); overflow-x: auto; }
+.stock-card-detail th { padding: 0.5rem 1.1rem; background: transparent; }
+.stock-card-detail td { padding: 0.55rem 1.1rem; }
+.stock-card-detail tbody tr:hover { background: rgba(255, 255, 255, 0.03); }
+
+@media (max-width: 640px) {
+  .stock-grid { grid-template-columns: 1fr; padding: 0.9rem; }
+}
+
 .tile-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; margin-bottom: 1.75rem; }
 .tile {
   display: flex; flex-direction: column;
