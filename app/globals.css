@@ -231,7 +231,9 @@ td.perm-cell input { width: auto; }
   text-transform: uppercase; color: var(--accent);
 }
 .tile h3 { font-size: 1.2rem; font-weight: 700; margin: 4px 0 14px; }
-.tile-icon { display: flex; justify-content: center; margin-bottom: 14px; color: var(--accent); }
+/* Fixed height so the tallest icon (the polo image) doesn't push the
+   Stock tile's description and footer out of line with its siblings. */
+.tile-icon { display: flex; align-items: center; justify-content: center; height: 82px; margin-bottom: 14px; color: var(--accent); }
 .tile p { font-size: 0.82rem; color: var(--ink-soft); margin-bottom: 14px; flex: 1 1 auto; }
 .tile-footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .tile-label { font-size: 0.75rem; color: var(--ink-faint); }
