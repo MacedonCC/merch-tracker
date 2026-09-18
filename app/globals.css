@@ -172,17 +172,42 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1
 }
 .chip-count { font-size: 0.72rem; opacity: 0.85; }
 
-.order-groups { display: flex; flex-direction: column; }
-.order-group {
-  display: flex; align-items: center; justify-content: space-between; gap: 16px;
-  padding: 0.75rem 1.15rem; border-bottom: 1px solid var(--line); flex-wrap: wrap;
+/* ---------------- Orders: one column grid for every chip ----------------
+   Name | Qty | Item | Ordered | (Status) | action | ⋯. The name column
+   never wraps, so names and emails stay on one line and push the item
+   column right; qty and dates are right-aligned to form clean edges. */
+.orders-table th, .orders-table td { padding-left: 0.85rem; padding-right: 0.85rem; }
+.orders-who { white-space: nowrap; width: 15rem; }
+.orders-who strong { font-weight: 500; }
+.orders-who div { font-size: 0.75rem; color: var(--ink-faint); }
+.orders-qty { width: 3rem; text-align: right; font-variant-numeric: tabular-nums; }
+.orders-table th.orders-qty, .orders-table th.orders-date { text-align: right; }
+.orders-date { text-align: right; white-space: nowrap; font-size: 0.85rem; font-variant-numeric: tabular-nums; }
+.orders-action { width: 1%; white-space: nowrap; }
+.orders-menu { width: 2.75rem; text-align: right; }
+.orders-table .orders-menu { padding-left: 0; padding-right: 0.6rem; }
+
+/* Ready: each customer is a <tbody>. Items inside a customer get a
+   faint divider; the line between customers is the strong one, and a
+   tinted left edge on the spanning name cell marks the block. */
+.order-group td { border-bottom-color: rgba(255, 255, 255, 0.035); }
+.order-group tr:last-child td,
+.order-group td[rowspan] { border-bottom: none; }
+.order-group + .order-group tr:first-child > td { border-top: 1px solid var(--line-strong); }
+.order-group-who, .order-group-action { vertical-align: top; }
+.order-group-who { box-shadow: inset 3px 0 0 var(--accent-soft); }
+.order-group:hover .order-group-who { box-shadow: inset 3px 0 0 var(--accent); }
+.order-group tr:hover { background: none; }
+.order-group:hover td { background: rgba(255, 255, 255, 0.02); }
+
+@media (max-width: 640px) {
+  .orders-who { white-space: normal; }
 }
-.order-group:last-child { border-bottom: none; }
-.order-group-who strong { font-weight: 500; }
-.order-group-who div { font-size: 0.75rem; color: var(--ink-faint); }
-.order-group-items { flex: 1 1 auto; font-size: 0.85rem; color: var(--ink-soft); }
-.order-group-items div + div { margin-top: 2px; }
-.order-group-item { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+
+.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+}
 
 .row-menu-wrap { position: relative; display: inline-block; }
 .row-menu-btn {

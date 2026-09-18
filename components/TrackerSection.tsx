@@ -693,55 +693,73 @@ export default function TrackerSection({
             <input placeholder="Search by name or email" value={orderSearch} onChange={(e) => setOrderSearch(e.target.value)} />
           </div>
 
-          {orderChip === 'ready' ? (
-            <div className="order-groups">
-              {readyGroups.length === 0 ? (
-                <div className="empty">Nothing ready to hand over.</div>
+          {/* Both views share one column grid — Name | Qty | Item | Ordered
+              | (status) | action | ⋯ — so switching chips doesn't shift
+              anything. In Ready, each customer is its own <tbody>: the
+              name and "Hand over all" cells span that customer's item
+              rows, pinned to the top, and each item keeps its own ⋯. */}
+          <table className="orders-table">
+            <thead>
+              <tr>
+                <th className="orders-who">Name</th>
+                <th className="orders-qty">Qty</th>
+                <th>Item</th>
+                <th className="orders-date">Ordered</th>
+                {orderChip !== 'ready' && <th>Status</th>}
+                <th className="orders-action"><span className="sr-only">Action</span></th>
+                <th className="orders-menu"><span className="sr-only">More</span></th>
+              </tr>
+            </thead>
+            {orderChip === 'ready' ? (
+              readyGroups.length === 0 ? (
+                <tbody>
+                  <tr><td colSpan={6}><div className="empty">Nothing ready to hand over.</div></td></tr>
+                </tbody>
               ) : readyGroups.map((g) => (
-                <div className="order-group" key={g.key}>
-                  <div className="order-group-who">
-                    <strong>{g.name}</strong>
-                    <div>{g.email ?? '—'}</div>
-                  </div>
-                  <div className="order-group-items">
-                    {g.items.map((i) => (
-                      <div key={i.id} className="order-group-item">
-                        <span>
-                          {i.quantity} × {i.stock_items ? `${i.stock_items.name} · ${i.stock_items.size}` : '—'}
-                          <span style={{ color: 'var(--ink-faint)', fontSize: '0.75rem', marginLeft: 8 }}>{formatDate(i.ordered_at)}</span>
-                        </span>
+                <tbody className="order-group" key={g.key}>
+                  {g.items.map((i, n) => (
+                    <tr key={i.id}>
+                      {n === 0 && (
+                        <td className="orders-who order-group-who" rowSpan={g.items.length}>
+                          <strong>{g.name}</strong>
+                          <div>{g.email ?? '—'}</div>
+                        </td>
+                      )}
+                      <td className="orders-qty">{i.quantity}</td>
+                      <td>{i.stock_items ? `${i.stock_items.name} · ${i.stock_items.size}` : '—'}</td>
+                      <td className="orders-date">{formatDate(i.ordered_at)}</td>
+                      {n === 0 && (
+                        <td className="orders-action order-group-action" rowSpan={g.items.length}>
+                          <button className="btn-mini" onClick={() => openHandoverModal(g.items.map((x) => x.id))}>
+                            {g.items.length > 1 ? 'Hand over all' : 'Hand over'}
+                          </button>
+                        </td>
+                      )}
+                      <td className="orders-menu">
                         <RowMenu
                           actions={[
                             { label: 'Hand over', onClick: () => openHandoverModal([i.id]) },
                             ...(isAdmin ? [{ label: 'Remove', onClick: () => removeOrder(i.id) }] : []),
                           ]}
                         />
-                      </div>
-                    ))}
-                  </div>
-                  <button className="btn-mini" onClick={() => openHandoverModal(g.items.map((i) => i.id))}>
-                    {g.items.length > 1 ? 'Hand over all' : 'Hand over'}
-                  </button>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <table>
-              <thead>
-                <tr><th>Who</th><th>Item</th><th>Qty</th><th>Ordered</th><th>Status</th><th></th><th></th></tr>
-              </thead>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              ))
+            ) : (
               <tbody>
                 {visibleOrders.length === 0 ? (
                   <tr><td colSpan={7}><div className="empty">No orders match.</div></td></tr>
                 ) : visibleOrders.map(({ order: o, state }) => (
                   <tr key={o.id}>
-                    <td>
-                      <strong style={{ fontWeight: 500 }}>{o.customer_name}</strong>
-                      <div style={{ fontSize: '0.75rem', color: 'var(--ink-faint)' }}>{o.customer_email ?? o.reference}</div>
+                    <td className="orders-who">
+                      <strong>{o.customer_name}</strong>
+                      <div>{o.customer_email ?? o.reference}</div>
                     </td>
+                    <td className="orders-qty">{o.quantity}</td>
                     <td>{o.stock_items ? `${o.stock_items.name} · ${o.stock_items.size}` : '—'}</td>
-                    <td>{o.quantity}</td>
-                    <td style={{ fontSize: '0.85rem' }}>{formatDate(o.ordered_at)}</td>
+                    <td className="orders-date">{formatDate(o.ordered_at)}</td>
                     <td>
                       {state === 'unpaid' && <span className="pill pill-out">Unpaid</span>}
                       {state === 'ready' && <span className="pill pill-ok">Ready</span>}
@@ -761,7 +779,7 @@ export default function TrackerSection({
                         </>
                       )}
                     </td>
-                    <td>
+                    <td className="orders-action">
                       {state === 'unpaid' && (
                         <button className="btn-mini" onClick={() => markPaid(o.id)}>Mark paid</button>
                       )}
@@ -777,7 +795,7 @@ export default function TrackerSection({
                         <button className="btn-mini btn-quiet" onClick={() => undoHandover(o.id)}>Undo</button>
                       )}
                     </td>
-                    <td>
+                    <td className="orders-menu">
                       <RowMenu
                         actions={[
                           ...(state === 'done' ? [{ label: 'Edit handover', onClick: () => openHandoverModal([o.id], o) }] : []),
@@ -788,8 +806,8 @@ export default function TrackerSection({
                   </tr>
                 ))}
               </tbody>
-            </table>
-          )}
+            )}
+          </table>
         </div>
       )}
 
