@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import Image from 'next/image';
 import { createClient } from '@/lib/supabase-client';
 
 interface Counts {
@@ -58,7 +59,16 @@ export default function HomeTiles() {
       href: '/stock',
       category: 'Inventory',
       title: 'Stock',
-      icon: <TileEmoji>👕</TileEmoji>,
+      icon: (
+        <Image
+          src="/mcc-polo.png"
+          alt=""
+          aria-hidden="true"
+          width={78}
+          height={82}
+          style={{ display: 'block' }}
+        />
+      ),
       description: 'Inventory levels for every item and size.',
       value: counts.onHand,
       label: 'garments on hand',
