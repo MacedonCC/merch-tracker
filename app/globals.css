@@ -223,28 +223,43 @@ td.perm-cell input { width: auto; }
 .bar i { display: block; height: 5px; border-radius: 3px; }
 
 /* ---------------- Stock: product × size matrix ----------------
-   One row per product, one column per size. The wrapper scrolls
-   sideways on narrow screens with the product column pinned; rows use
+   One row per product, one column per size. Size columns are a fixed
+   two-digit width and the product column absorbs whatever is left, so
+   a desktop-width card fits every size without scrolling; below that
+   the wrapper scrolls sideways with the product column pinned. Rows use
    opaque alternating backgrounds (set on the cells, not the row) so
    the pinned column never shows the numbers sliding underneath it. */
 .matrix-wrap { overflow-x: auto; }
 .matrix { width: 100%; font-variant-numeric: tabular-nums; }
-.matrix th, .matrix td { padding: 0.35rem 0.6rem; font-size: 0.84rem; white-space: nowrap; }
-.matrix thead th { background-color: var(--wash); }
+.matrix th, .matrix td {
+  padding: 0.35rem 0.25rem; font-size: 0.84rem; white-space: nowrap;
+  border: 1px solid var(--line);
+}
+/* The card already draws the outer edge. */
+.matrix tr > :first-child { border-left: none; }
+.matrix tr > :last-child { border-right: none; }
+.matrix thead th { border-top: none; }
+.matrix tbody tr:last-child > * { border-bottom: none; }
+
+.matrix thead th {
+  background-color: var(--wash); border-bottom-color: var(--line-strong);
+  font-size: 0.72rem; vertical-align: middle;
+}
 .matrix tbody tr > * { background-color: var(--paper); }
 .matrix tbody tr:nth-child(even) > * { background-color: var(--row-alt); }
 .matrix tbody tr:hover { background: none; }
 .matrix tbody tr:hover > * { background-color: var(--row-hover); }
 
-.matrix-num { text-align: right; min-width: 3.2rem; }
-.matrix th.matrix-num { text-align: right; }
+.matrix-num { width: 2.75rem; text-align: center; vertical-align: middle; }
+.matrix th.matrix-num { text-align: center; white-space: normal; line-height: 1.2; }
 
 /* border-collapse drops borders on sticky cells, hence the shadow. */
 .matrix-product {
   position: sticky; left: 0; z-index: 1;
-  min-width: 160px; max-width: 240px; white-space: normal;
-  text-align: left; box-shadow: 1px 0 0 var(--line);
+  min-width: 160px; white-space: normal; text-align: left;
+  box-shadow: 1px 0 0 var(--line);
 }
+.matrix .matrix-product { padding-left: 0.75rem; padding-right: 0.6rem; }
 .matrix thead .matrix-product { z-index: 2; }
 .matrix tbody .matrix-product { font-size: 0.84rem; font-weight: 400; color: var(--ink); }
 .matrix-name { display: block; font-weight: 600; line-height: 1.3; }
@@ -255,7 +270,7 @@ td.perm-cell input { width: auto; }
 }
 .matrix-owed { color: var(--warn); cursor: help; }
 
-.matrix-total { font-weight: 700; box-shadow: inset 1px 0 0 var(--line); }
+.matrix .matrix-total { width: 3.25rem; font-weight: 700; }
 
 /* A stocked cell is filled edge to edge by its line(s), which carry the
    status tint — a wash of colour rather than a pill, so the grid stays
@@ -263,8 +278,8 @@ td.perm-cell input { width: auto; }
 td.matrix-cell { padding: 0; height: 1px; }
 .matrix-stack { display: flex; flex-direction: column; height: 100%; }
 .matrix-line {
-  flex: 1 1 auto; display: flex; align-items: center; justify-content: flex-end; gap: 6px;
-  width: 100%; padding: 0.35rem 0.6rem;
+  flex: 1 1 auto; display: flex; align-items: center; justify-content: center; gap: 5px;
+  width: 100%; padding: 0.35rem 0.25rem;
   font: inherit; font-variant-numeric: tabular-nums; line-height: 1.4;
   border: none; border-radius: 0; box-shadow: none; background-image: none;
 }
@@ -272,7 +287,7 @@ td.matrix-cell { padding: 0; height: 1px; }
 button.matrix-line { cursor: pointer; }
 button.matrix-line:hover { filter: brightness(1.35); }
 button.matrix-line:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-.matrix-line-size { margin-right: auto; font-size: 0.7rem; opacity: 0.75; }
+.matrix-line-size { font-size: 0.7rem; opacity: 0.75; }
 
 .matrix-ok { --tint: var(--tint-ok); color: var(--ink); }
 .matrix-low { --tint: var(--tint-low); color: var(--warn); }
@@ -296,7 +311,7 @@ button.matrix-line:hover { background-color: var(--tint); }
 .matrix-key { display: inline-flex; align-items: center; gap: 5px; padding: 1px 7px; border-radius: 4px; }
 
 @media (max-width: 640px) {
-  .matrix-product { min-width: 120px; max-width: 42vw; }
+  .matrix-product { min-width: 120px; }
 }
 
 .tile-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; margin-bottom: 1.75rem; }
