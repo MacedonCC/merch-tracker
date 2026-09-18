@@ -16,6 +16,12 @@
   --alert-soft: rgba(255, 86, 48, 0.16);
   --nav-band: #12161d;
   --radius: 8px;
+  --row-alt: #1b2029;
+  --row-hover: #212733;
+  --tint-ok: rgba(47, 111, 237, 0.08);
+  --tint-low: rgba(245, 165, 36, 0.15);
+  --tint-out: rgba(255, 86, 48, 0.13);
+  --tint-oversold: rgba(255, 86, 48, 0.28);
 
   /* Brushed-metal surface: a restrained sheen (lighter top, darker
      bottom, suggesting a light source above), layered as a second
@@ -216,78 +222,81 @@ td.perm-cell input { width: auto; }
 .bar { width: 70px; height: 5px; background: var(--wash); border-radius: 3px; display: inline-block; vertical-align: middle; margin-left: 8px; }
 .bar i { display: block; height: 5px; border-radius: 3px; }
 
-/* ---------------- Stock: one expandable card per product ----------------
-   Collapsed, a card answers "how many, what does it cost, is anything
-   wrong, which sizes" without opening anything. Expanded, it holds the
-   same per-size table the flat list used, so it spans the full grid
-   width rather than squeezing eight columns into a third of a row. */
-.stock-grid {
-  display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-  gap: 14px; padding: 1.15rem;
-}
-.stock-card {
-  display: flex; flex-direction: column; gap: 10px;
-  background-color: var(--wash); background-image: var(--sheen);
-  border: 1px solid var(--line); border-radius: 10px; padding: 1rem 1.1rem;
-  box-shadow: var(--shine-shadow);
-}
-.stock-card.is-open { grid-column: 1 / -1; border-color: var(--line-strong); }
+/* ---------------- Stock: product × size matrix ----------------
+   One row per product, one column per size. The wrapper scrolls
+   sideways on narrow screens with the product column pinned; rows use
+   opaque alternating backgrounds (set on the cells, not the row) so
+   the pinned column never shows the numbers sliding underneath it. */
+.matrix-wrap { overflow-x: auto; }
+.matrix { width: 100%; font-variant-numeric: tabular-nums; }
+.matrix th, .matrix td { padding: 0.35rem 0.6rem; font-size: 0.84rem; white-space: nowrap; }
+.matrix thead th { background-color: var(--wash); }
+.matrix tbody tr > * { background-color: var(--paper); }
+.matrix tbody tr:nth-child(even) > * { background-color: var(--row-alt); }
+.matrix tbody tr:hover { background: none; }
+.matrix tbody tr:hover > * { background-color: var(--row-hover); }
 
-.stock-card-head {
-  display: flex; align-items: flex-start; justify-content: space-between; gap: 10px;
-  width: 100%; padding: 0; text-align: left;
-  background: none; border: none; box-shadow: none; color: inherit; cursor: pointer;
+.matrix-num { text-align: right; min-width: 3.2rem; }
+.matrix th.matrix-num { text-align: right; }
+
+/* border-collapse drops borders on sticky cells, hence the shadow. */
+.matrix-product {
+  position: sticky; left: 0; z-index: 1;
+  min-width: 160px; max-width: 240px; white-space: normal;
+  text-align: left; box-shadow: 1px 0 0 var(--line);
 }
-.stock-card-head:hover { background: none; }
-.stock-card-head:hover .stock-card-name { color: var(--accent); }
-.stock-card-title { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.stock-card-name { font-size: 1rem; font-weight: 600; letter-spacing: -0.01em; }
-.stock-card-cat {
-  font-size: 0.7rem; font-weight: 700; letter-spacing: 0.06em;
+.matrix thead .matrix-product { z-index: 2; }
+.matrix tbody .matrix-product { font-size: 0.84rem; font-weight: 400; color: var(--ink); }
+.matrix-name { display: block; font-weight: 600; line-height: 1.3; }
+.matrix-meta {
+  display: block; margin-top: 1px;
+  font-size: 0.66rem; font-weight: 700; letter-spacing: 0.06em;
   text-transform: uppercase; color: var(--ink-faint);
 }
-.stock-card-chevron {
-  font-size: 1.15rem; line-height: 1; color: var(--ink-faint); flex-shrink: 0;
-  transition: transform 0.15s ease; transform-origin: 50% 50%;
+.matrix-owed { color: var(--warn); cursor: help; }
+
+.matrix-total { font-weight: 700; box-shadow: inset 1px 0 0 var(--line); }
+
+/* A stocked cell is filled edge to edge by its line(s), which carry the
+   status tint — a wash of colour rather than a pill, so the grid stays
+   quiet and the numbers stay aligned. */
+td.matrix-cell { padding: 0; height: 1px; }
+.matrix-stack { display: flex; flex-direction: column; height: 100%; }
+.matrix-line {
+  flex: 1 1 auto; display: flex; align-items: center; justify-content: flex-end; gap: 6px;
+  width: 100%; padding: 0.35rem 0.6rem;
+  font: inherit; font-variant-numeric: tabular-nums; line-height: 1.4;
+  border: none; border-radius: 0; box-shadow: none; background-image: none;
 }
-.stock-card-chevron[data-open="true"] { transform: rotate(90deg); color: var(--accent); }
+.matrix-line + .matrix-line { border-top: 1px solid var(--line); }
+button.matrix-line { cursor: pointer; }
+button.matrix-line:hover { filter: brightness(1.35); }
+button.matrix-line:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.matrix-line-size { margin-right: auto; font-size: 0.7rem; opacity: 0.75; }
 
-.stock-card-figures { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
-.stock-card-total { font-size: 0.76rem; color: var(--ink-faint); }
-.stock-card-total strong {
-  font-size: 1.6rem; font-weight: 700; letter-spacing: -0.02em;
-  color: var(--ink); margin-right: 5px;
+.matrix-ok { --tint: var(--tint-ok); color: var(--ink); }
+.matrix-low { --tint: var(--tint-low); color: var(--warn); }
+.matrix-out { --tint: var(--tint-out); color: var(--alert); }
+.matrix-oversold { --tint: var(--tint-oversold); color: var(--alert); font-weight: 700; }
+.matrix-line, .matrix-key { background-color: var(--tint, transparent); }
+button.matrix-line:hover { background-color: var(--tint); }
+.matrix-line.matrix-oversold, .matrix-key.matrix-oversold { box-shadow: inset 0 0 0 1px var(--alert); }
+
+/* Not made in this size: a faint dash, clearly not a zero. */
+.matrix-none { color: var(--line-strong); }
+
+/* Under a status filter, everything outside that state recedes. */
+.is-dimmed { opacity: 0.3; }
+
+.matrix-legend {
+  display: flex; flex-wrap: wrap; gap: 6px 14px;
+  padding: 0.6rem 1.15rem; border-top: 1px solid var(--line);
+  font-size: 0.72rem; color: var(--ink-faint);
 }
-.stock-card-price { font-size: 0.82rem; color: var(--ink-soft); }
-.stock-card-status { display: flex; }
-
-/* The size strip: the bit that makes a collapsed card worth reading —
-   every size, its count, and its own status colour. */
-.size-strip { display: flex; flex-wrap: wrap; gap: 5px; }
-.size-chip {
-  display: inline-flex; align-items: center; gap: 5px;
-  padding: 2px 7px; border-radius: 6px;
-  font-size: 0.72rem; font-weight: 600; line-height: 1.5;
-  border: 1px solid transparent; background-image: var(--sheen);
-}
-.size-chip-size { opacity: 0.8; font-weight: 500; }
-.size-chip-count { font-variant-numeric: tabular-nums; }
-.size-chip-ok { background-color: var(--accent-soft); color: var(--accent); }
-.size-chip-low { background-color: var(--warn-soft); color: var(--warn); }
-.size-chip-out { background-color: var(--alert-soft); color: var(--alert); }
-.size-chip-oversold { background-color: var(--alert-soft); color: var(--alert); border-color: var(--alert); }
-
-/* Sizes outside an active status filter stay visible — the card's
-   totals only add up if you can still see them — but recede. */
-.is-dimmed { opacity: 0.35; }
-
-.stock-card-detail { margin: 4px -1.1rem -1rem; border-top: 1px solid var(--line); overflow-x: auto; }
-.stock-card-detail th { padding: 0.5rem 1.1rem; background: transparent; }
-.stock-card-detail td { padding: 0.55rem 1.1rem; }
-.stock-card-detail tbody tr:hover { background: rgba(255, 255, 255, 0.03); }
+.matrix-key { display: inline-flex; align-items: center; gap: 5px; padding: 1px 7px; border-radius: 4px; }
 
 @media (max-width: 640px) {
-  .stock-grid { grid-template-columns: 1fr; padding: 0.9rem; }
+  .matrix-product { min-width: 120px; max-width: 42vw; }
 }
 
 .tile-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; margin-bottom: 1.75rem; }

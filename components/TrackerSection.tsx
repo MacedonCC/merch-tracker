@@ -98,39 +98,48 @@ const money = (n: number) =>
 
 const formatDate = (iso: string) => new Date(iso).toLocaleDateString('en-AU');
 
-// ---- Stock grouping -------------------------------------------------
-// The Stock page shows one card per product rather than one row per
-// size — 86 flat rows said very little at a glance. A card summarises
-// its sizes (total on hand, price or price range, worst status, a chip
-// per size) and expands to the same per-size table the flat list used.
+// ---- Stock matrix ---------------------------------------------------
+// The Stock page is one row per product and one column per size, so the
+// whole cupboard reads as a single grid: scan a column to compare a
+// size across products, scan a row to see one product's spread.
+
+// Fixed column order. Stock rows store size as free text, so each is
+// normalised onto one of these by sizeColumn(); anything unrecognised
+// lands in a trailing Other column rather than being dropped — the grid
+// must never hide stock.
+const SIZE_COLUMNS = ['JNR8', 'JNR10', 'JNR12', 'JNR14', 'JNR16', 'XS', 'S', 'M', 'L', 'XL', '2XL', '3XL', '4XL', 'One size'];
+const OTHER_COLUMN = 'Other';
+const MATRIX_COLUMNS = [...SIZE_COLUMNS, OTHER_COLUMN];
+
+const CANONICAL_SIZES = new Map(SIZE_COLUMNS.map((c) => [c.toLowerCase(), c]));
+const SIZE_ALIASES: Record<string, string> = {
+  small: 'S',
+  medium: 'M',
+  large: 'L',
+  'one size fits all': 'One size',
+};
+
+function sizeColumn(size: string): string {
+  const key = size.trim().toLowerCase().replace(/\s+/g, ' ');
+  return CANONICAL_SIZES.get(key) ?? SIZE_ALIASES[key] ?? OTHER_COLUMN;
+}
 
 // Worst-first: a product with an oversold size outranks one that is
-// merely out, which outranks low. Also the card sort order.
+// merely out, which outranks low. Also the row sort order.
 const STATUS_RANK: Record<StockRow['stock_status'], number> = { oversold: 0, out: 1, low: 2, ok: 3 };
-const STATUS_SUMMARY: Record<'oversold' | 'out' | 'low', string> = {
-  oversold: 'oversold',
-  out: 'out of stock',
-  low: 'low',
-};
-
-// Sizes sort by the SIZES list above rather than alphabetically, so a
-// strip reads XS S M L XL instead of 2XL L M S XL.
-const sizeOrder = (size: string) => {
-  const i = SIZES.indexOf(size);
-  return i === -1 ? SIZES.length : i;
-};
 
 interface StockGroup {
   key: string;
-  slug: string;
   name: string;
   category: string;
-  sizes: StockRow[];
+  rows: StockRow[];
+  // Column -> the stock lines in it. Usually one, but two rows can
+  // normalise onto the same column (e.g. "Small" and "S"), and Other can
+  // hold several — every line keeps its own clickable entry.
+  cells: Map<string, StockRow[]>;
   onHand: number;
-  minPrice: number;
-  maxPrice: number;
+  owed: number;
   worst: StockRow['stock_status'];
-  worstCount: number;
 }
 
 function groupStock(rows: StockRow[]): StockGroup[] {
@@ -142,26 +151,28 @@ function groupStock(rows: StockRow[]): StockGroup[] {
     else map.set(key, [r]);
   }
 
-  return Array.from(map.entries()).map(([key, sizes], i) => {
-    sizes.sort((a, b) => sizeOrder(a.size) - sizeOrder(b.size) || a.size.localeCompare(b.size));
-    const prices = sizes.map((s) => s.price);
-    const worst = sizes.reduce<StockRow['stock_status']>(
-      (w, s) => (STATUS_RANK[s.stock_status] < STATUS_RANK[w] ? s.stock_status : w),
-      'ok'
-    );
+  return Array.from(map.entries()).map(([key, rows]) => {
+    const cells = new Map<string, StockRow[]>();
+    for (const r of rows) {
+      const col = sizeColumn(r.size);
+      const list = cells.get(col);
+      if (list) list.push(r);
+      else cells.set(col, [r]);
+    }
+    cells.forEach((list) => list.sort((a, b) => a.size.localeCompare(b.size)));
+
     return {
       key,
-      // Only ever used as a DOM id for aria-controls; the index keeps
-      // it unique even if two products slugify the same.
-      slug: `${key.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${i}`,
       name: key,
-      category: sizes[0].category,
-      sizes,
-      onHand: sizes.reduce((n, s) => n + s.on_hand, 0),
-      minPrice: Math.min(...prices),
-      maxPrice: Math.max(...prices),
-      worst,
-      worstCount: sizes.filter((s) => s.stock_status === worst).length,
+      category: rows[0].category,
+      rows,
+      cells,
+      onHand: rows.reduce((n, s) => n + s.on_hand, 0),
+      owed: rows.reduce((n, s) => n + s.committed, 0),
+      worst: rows.reduce<StockRow['stock_status']>(
+        (w, s) => (STATUS_RANK[s.stock_status] < STATUS_RANK[w] ? s.stock_status : w),
+        'ok'
+      ),
     };
   });
 }
@@ -240,9 +251,6 @@ export default function TrackerSection({
   const [search, setSearch] = useState('');
   const [cat, setCat] = useState('');
   const [level, setLevel] = useState('');
-  // Which product cards the viewer has explicitly opened or closed.
-  // Absent from the map means "follow the filter" — see openGroups below.
-  const [cardOverrides, setCardOverrides] = useState<Record<string, boolean>>({});
   const [orderSearch, setOrderSearch] = useState('');
   const [orderChip, setOrderChip] = useState<'all' | OrderState>('ready');
 
@@ -260,10 +268,6 @@ export default function TrackerSection({
   }
 
   useEffect(() => { load(); }, []);
-
-  // Changing the status filter re-derives which cards are open, so any
-  // manual open/close from the previous filter is dropped.
-  useEffect(() => { setCardOverrides({}); }, [level]);
 
   function flash(t: string) {
     setMessage(t);
@@ -444,21 +448,21 @@ export default function TrackerSection({
 
   // Search and category match the product; the status filter keeps any
   // product with at least one size in that state (the non-matching
-  // sizes are dimmed rather than dropped, so the card still adds up).
+  // cells are dimmed rather than dropped, so the row still adds up).
   const visibleGroups = groupStock(stock)
     .filter((g) => {
       const q = search.trim().toLowerCase();
       if (q && !g.name.toLowerCase().includes(q)) return false;
-      if (cat && !g.sizes.some((s) => s.category === cat)) return false;
-      if (level && !g.sizes.some((s) => s.stock_status === level)) return false;
+      if (cat && !g.rows.some((s) => s.category === cat)) return false;
+      if (level && !g.rows.some((s) => s.stock_status === level)) return false;
       return true;
     })
     .sort((a, b) => STATUS_RANK[a.worst] - STATUS_RANK[b.worst] || a.name.localeCompare(b.name));
 
-  // A status filter auto-opens the cards it matched, so filtering to
-  // "oversold" lands on the offending sizes rather than on a row of
-  // closed cards. An explicit click still wins over that default.
-  const isCardOpen = (g: StockGroup) => cardOverrides[g.key] ?? Boolean(level);
+  // Only the size columns some visible product actually uses, so a
+  // search for caps doesn't drag along thirteen empty columns.
+  const visibleColumns = MATRIX_COLUMNS.filter((c) => visibleGroups.some((g) => g.cells.has(c)));
+
   const isDimmed = (s: StockRow) => Boolean(level) && s.stock_status !== level;
 
   const classifiedOrders = orders.map((o) => ({ order: o, state: classifyOrder(o, byId) }));
@@ -484,11 +488,50 @@ export default function TrackerSection({
   if (loading)
     return <p style={{ color: 'var(--ink-soft)' }}>Loading…</p>;
 
-  const pill = (s: StockRow) => {
-    if (s.stock_status === 'oversold') return <span className="pill pill-out">Oversold</span>;
-    if (s.stock_status === 'out') return <span className="pill pill-out">None left</span>;
-    if (s.stock_status === 'low') return <span className="pill pill-low">Low</span>;
-    return <span className="pill pill-ok">In stock</span>;
+  // One matrix cell. A size the product doesn't come in gets a faint
+  // dash (distinct from a tinted 0); otherwise each stock line in the
+  // column is its own entry, labelled with its raw size only when the
+  // cell holds more than one line or sits in Other.
+  const matrixCell = (g: StockGroup, col: string) => {
+    const lines = g.cells.get(col);
+    if (!lines)
+      return (
+        <td key={col} className="matrix-num">
+          <span className="matrix-none" title={`${g.name} doesn't come in ${col}`}>–</span>
+        </td>
+      );
+
+    const labelled = lines.length > 1 || col === OTHER_COLUMN;
+    return (
+      <td key={col} className="matrix-num matrix-cell">
+        <div className="matrix-stack">
+          {lines.map((s) => {
+            const cls = `matrix-line matrix-${s.stock_status}${isDimmed(s) ? ' is-dimmed' : ''}`;
+            const detail = `${s.name} · ${s.size}: ${s.on_hand} on hand, ${s.committed} owed, ${s.available} available`;
+            const content = (
+              <>
+                {labelled && <span className="matrix-line-size">{s.size}</span>}
+                <span className="matrix-line-count">{s.on_hand}</span>
+              </>
+            );
+            return canEditStock ? (
+              <button
+                key={s.id}
+                type="button"
+                className={cls}
+                title={detail}
+                aria-label={`Edit ${detail}`}
+                onClick={() => { setEditing(s); setModal('edit'); }}
+              >
+                {content}
+              </button>
+            ) : (
+              <span key={s.id} className={cls} title={detail}>{content}</span>
+            );
+          })}
+        </div>
+      </td>
+    );
   };
 
   return (
@@ -539,91 +582,53 @@ export default function TrackerSection({
           {visibleGroups.length === 0 ? (
             <div className="empty">Nothing matches those filters.</div>
           ) : (
-            <div className="stock-grid">
-              {visibleGroups.map((g) => {
-                const open = isCardOpen(g);
-                return (
-                  <section key={g.key} className={`stock-card${open ? ' is-open' : ''}`}>
-                    <button
-                      type="button"
-                      className="stock-card-head"
-                      aria-expanded={open}
-                      aria-controls={`sizes-${g.slug}`}
-                      onClick={() => setCardOverrides((o) => ({ ...o, [g.key]: !open }))}
-                    >
-                      <span className="stock-card-title">
-                        <span className="stock-card-name">{g.name}</span>
-                        <span className="stock-card-cat">{g.category}</span>
-                      </span>
-                      <span className="stock-card-chevron" aria-hidden="true" data-open={open}>›</span>
-                    </button>
-
-                    <div className="stock-card-figures">
-                      <span className="stock-card-total">
-                        <strong>{g.onHand}</strong> on hand
-                      </span>
-                      <span className="stock-card-price">
-                        {g.minPrice === g.maxPrice
-                          ? money(g.minPrice)
-                          : `${money(g.minPrice)} – ${money(g.maxPrice)}`}
-                      </span>
-                    </div>
-
-                    <div className="stock-card-status">
-                      {g.worst === 'ok' ? (
-                        <span className="pill pill-ok">In stock</span>
-                      ) : (
-                        <span className={`pill ${g.worst === 'low' ? 'pill-low' : 'pill-out'}`}>
-                          {g.worstCount} {STATUS_SUMMARY[g.worst]}
-                        </span>
-                      )}
-                    </div>
-
-                    <div className="size-strip">
-                      {g.sizes.map((s) => (
-                        <span
-                          key={s.id}
-                          className={`size-chip size-chip-${s.stock_status}${isDimmed(s) ? ' is-dimmed' : ''}`}
-                          title={`${s.size}: ${s.on_hand} on hand, ${s.available} available`}
-                        >
-                          <span className="size-chip-size">{s.size}</span>
-                          <span className="size-chip-count">{s.on_hand}</span>
-                        </span>
+            <>
+              <div className="matrix-wrap">
+                <table className="matrix">
+                  <thead>
+                    <tr>
+                      <th className="matrix-product" scope="col">Product</th>
+                      {visibleColumns.map((c) => (
+                        <th key={c} className="matrix-num" scope="col">{c}</th>
                       ))}
-                    </div>
-
-                    {open && (
-                      <div className="stock-card-detail" id={`sizes-${g.slug}`}>
-                        <table>
-                          <thead>
-                            <tr>
-                              <th>Size</th><th>Price</th><th>On hand</th><th>Owed</th>
-                              <th>Available</th><th>Target</th><th>Status</th><th></th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {g.sizes.map((s) => (
-                              <tr key={s.id} className={isDimmed(s) ? 'is-dimmed' : undefined}>
-                                <td>{s.size}</td>
-                                <td>{money(s.price)}</td>
-                                <td>{s.on_hand}</td>
-                                <td>{s.committed || '—'}</td>
-                                <td style={{ color: s.available < 0 ? 'var(--alert)' : undefined, fontWeight: 500 }}>
-                                  {s.available}
-                                </td>
-                                <td>{s.target_level}</td>
-                                <td>{pill(s)}</td>
-                                <td>{canEditStock && <button className="btn-mini" onClick={() => { setEditing(s); setModal('edit'); }}>Edit</button>}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    )}
-                  </section>
-                );
-              })}
-            </div>
+                      <th className="matrix-num matrix-total" scope="col">Total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {visibleGroups.map((g) => (
+                      <tr key={g.key}>
+                        <th className="matrix-product" scope="row">
+                          <span className="matrix-name">{g.name}</span>
+                          <span className="matrix-meta">
+                            {g.category}
+                            {g.owed > 0 && (
+                              <span
+                                className="matrix-owed"
+                                title={g.rows
+                                  .filter((s) => s.committed > 0)
+                                  .map((s) => `${s.size}: ${s.committed}`)
+                                  .join(', ')}
+                              >
+                                {' · '}{g.owed} owed
+                              </span>
+                            )}
+                          </span>
+                        </th>
+                        {visibleColumns.map((c) => matrixCell(g, c))}
+                        <td className={`matrix-num matrix-total${level ? ' is-dimmed' : ''}`}>{g.onHand}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className="matrix-legend" aria-hidden="true">
+                <span className="matrix-key matrix-ok">In stock</span>
+                <span className="matrix-key matrix-low">Low</span>
+                <span className="matrix-key matrix-out">None left</span>
+                <span className="matrix-key matrix-oversold">Oversold</span>
+                <span className="matrix-key"><span className="matrix-none">–</span> Not made in that size</span>
+              </div>
+            </>
           )}
         </div>
       )}
