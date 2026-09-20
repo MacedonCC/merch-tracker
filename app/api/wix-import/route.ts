@@ -79,6 +79,24 @@ interface CatalogueEntry {
   price: number;
 }
 
+// Vercel returned `Cache-Control: public, max-age=0, must-revalidate`
+// on this route by default. "public" lets a shared cache store the
+// response, and a dry run repeated after several Wix edits came back
+// byte-identical (same MD5) while a never-before-requested URL on the
+// same route returned X-Vercel-Cache: BYPASS with the edits present.
+// Every response here is a point-in-time view of someone else's
+// catalogue, so none of it may be stored by anything.
+function json(body: unknown, status = 200) {
+  return NextResponse.json(body, {
+    status,
+    headers: {
+      'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0',
+      'CDN-Cache-Control': 'no-store',
+      'Vercel-CDN-Cache-Control': 'no-store',
+    },
+  });
+}
+
 function authorised(req: NextRequest): boolean {
   const secret = process.env.CRON_SECRET;
   if (!secret) return false;
@@ -140,11 +158,11 @@ function catalogueEntries(p: WixProduct): CatalogueEntry[] {
 
 export async function GET(req: NextRequest) {
   if (!authorised(req)) {
-    return NextResponse.json({ error: 'Not authorised' }, { status: 401 });
+    return json({ error: 'Not authorised' }, 401);
   }
 
   if (!process.env.WIX_API_KEY || !process.env.WIX_SITE_ID) {
-    return NextResponse.json({ error: 'Wix is not connected yet.' }, { status: 400 });
+    return json({ error: 'Wix is not connected yet.' }, 400);
   }
 
   const dryRun = req.nextUrl.searchParams.get('dryRun') === '1';
@@ -171,17 +189,14 @@ export async function GET(req: NextRequest) {
 
   if (!res.ok) {
     const detail = await res.text();
-    return NextResponse.json(
-      { error: `Wix returned ${res.status}`, detail: detail.slice(0, 400) },
-      { status: 502 }
-    );
+    return json({ error: `Wix returned ${res.status}`, detail: detail.slice(0, 400) }, 502);
   }
 
   const data = await res.json();
   const products: WixProduct[] = data.products ?? [];
 
   if (raw) {
-    return NextResponse.json({
+    return json({
       ok: true,
       fetchedAt: new Date().toISOString(),
       productsFound: products.length,
@@ -385,7 +400,7 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  return NextResponse.json({
+  return json({
     ok: true,
     dryRun,
     note: dryRun
