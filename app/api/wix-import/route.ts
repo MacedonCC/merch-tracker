@@ -269,6 +269,34 @@ export async function GET(req: NextRequest) {
     .filter((r) => r.wix_variant_id && !liveVariantIds.has(r.wix_variant_id))
     .map((r) => `${r.name} / ${r.size}: ${r.wix_variant_id}`);
 
+  // A linked row whose tracker name no longer matches its Wix product.
+  // This is survivable on its own - an id match does not care what
+  // anything is called - but it is the first half of the failure that
+  // strands stock. The second half is Wix regenerating a variant id
+  // (which it does whenever a product's size options are edited); with
+  // both, a size matches neither by id nor by name, gets created as a
+  // new line, and its stock is left on the old row. Flagged here so a
+  // rename is noticed while it is still harmless.
+  const nameDrift: Array<Record<string, string>> = [];
+  {
+    const wixNameById = new Map<string, string>();
+    for (const p of products) wixNameById.set(p.id, tidyName(p.name ?? ''));
+    const reported = new Set<string>();
+    for (const r of rows) {
+      if (!r.wix_product_id) continue;
+      const wixName = wixNameById.get(r.wix_product_id);
+      if (!wixName || wixName === r.name || reported.has(r.name)) continue;
+      reported.add(r.name);
+      nameDrift.push({
+        tracker: r.name,
+        wix: wixName,
+        matchesAnyway: nameSizeKey(r.name, '') === nameSizeKey(wixName, '')
+          ? 'yes - differs only by punctuation'
+          : 'NO - name fallback will not match this product',
+      });
+    }
+  }
+
   // A row already linked to a DIFFERENT Wix product must not be stolen
   // by a name collision, and one row must not be claimed twice.
   const consumed = new Set<string>();
@@ -434,6 +462,7 @@ export async function GET(req: NextRequest) {
         duplicateWixSizes: duplicateWixSizes.length,
       conflicts: conflicts.length,
       staleVariantIds: staleVariantIds.length,
+      nameDrift: nameDrift.length,
       failed: failed.length,
     },
     toLink,
@@ -444,6 +473,7 @@ export async function GET(req: NextRequest) {
     duplicateWixSizes,
     conflicts,
     staleVariantIds,
+    nameDrift,
     failed,
   });
 }
