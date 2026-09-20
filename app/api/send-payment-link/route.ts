@@ -61,7 +61,7 @@ export async function POST(req: NextRequest) {
   const supabase = createServerSupabase();
   const { data: order, error } = await supabase
     .from('orders')
-    .select('id, customer_name, customer_email, quantity, unit_price, stock_items(name, size, wix_product_url)')
+    .select('id, customer_name, customer_email, quantity, unit_price, distributed_at, stock_items(name, size, wix_product_url)')
     .eq('id', orderId)
     .maybeSingle();
 
@@ -95,6 +95,11 @@ export async function POST(req: NextRequest) {
     quantity: order.quantity,
     unitPrice: Number(order.unit_price) || 0,
     paymentUrl: item.wix_product_url,
+    // Whether they walked away with it is read from the order itself,
+    // not posted by the browser. distributed_at is set only by the
+    // "taking it now" path, so its presence on a still-unpaid order is
+    // exactly the condition the copy needs to describe.
+    takenNow: !!order.distributed_at,
     hasLogo: !!logo,
   };
 

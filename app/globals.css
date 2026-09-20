@@ -635,3 +635,13 @@ button.matrix-line:hover { background-color: var(--tint); }
 .sell-done-sent {
   margin-top: 4px; font-size: 0.95rem; color: var(--ink-soft);
 }
+
+/* Two-line buttons on the "taking it now?" question: the sub-line
+   carries the consequence, which is the bit a coach needs to be sure
+   about before tapping. Buttons grow rather than clipping the text. */
+.sell-big .sell-btn-sub {
+  display: block; margin-top: 3px;
+  font-size: 0.8rem; font-weight: 500; opacity: 0.85;
+  line-height: 1.3; white-space: normal;
+}
+.sell-big:has(.sell-btn-sub) { min-height: 84px; padding-top: 12px; padding-bottom: 12px; }

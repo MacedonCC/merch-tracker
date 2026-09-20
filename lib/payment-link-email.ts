@@ -29,11 +29,16 @@ import { money } from '@/lib/types';
 // onto a dark panel. Spanning the band across the whole card means that
 // wherever the inversion lands, it reads as a deliberate masthead.
 //
-// NOTE ON WORDING: this must not promise the item is reserved. A
-// payment-link sale is recorded as `pending`, and stock_overview counts
+// NOTE ON WORDING: one paragraph differs depending on whether the
+// parent walked away with the item (`takenNow`) or the club is holding
+// it. The collect-later wording must not promise the item is RESERVED:
+// a payment-link sale is recorded as `pending`, stock_overview counts
 // only `paid` orders as committed, so nothing is actually held back and
-// another coach can sell the last one. The copy says the order is
-// recorded and will be ready once payment clears, which is true.
+// another coach can sell the last one. It says the order is recorded
+// and will be ready once payment clears, which is true. The taken-now
+// wording acknowledges they already have it and asks for payment —
+// getting these two backwards would either nag someone holding nothing
+// or tell someone holding the goods that we are keeping them safe.
 
 export const CONTACT_NAME = 'Anthony Belcher';
 export const CONTACT_PHONE = '0404 221 003';
@@ -60,10 +65,24 @@ export interface PaymentLinkEmailInput {
   quantity: number;
   unitPrice: number;
   paymentUrl: string;
+  /** True when the parent walked away with the item and will pay
+   *  afterwards, false when the club is holding it until they do. Only
+   *  changes one paragraph of copy, but getting it backwards would
+   *  either nag someone who has nothing or tell someone holding the
+   *  goods that we are keeping them safe. */
+  takenNow: boolean;
   /** False when the logo file could not be read; the <img> is then
    *  omitted rather than left pointing at a missing attachment. */
   hasLogo: boolean;
 }
+
+// The one paragraph that differs between the two payment-link cases.
+const TAKEN_NOW_TEXT =
+  'You&rsquo;ve got this one with you already. When you get a moment, ' +
+  'please pay using the link and we&rsquo;ll mark it off.';
+const COLLECT_LATER_TEXT =
+  "Once your payment comes through we&rsquo;ll have this ready to collect " +
+  'at the club. Bring nothing &mdash; we&rsquo;ll match it up with your name.';
 
 function escapeHtml(value: string): string {
   return value
@@ -103,9 +122,16 @@ export function paymentLinkText(input: PaymentLinkEmailInput): string {
     'Pay online here:',
     input.paymentUrl,
     '',
-    "Once your payment comes through we'll have this ready to",
-    "collect at the club. Bring nothing - we'll match it up with",
-    'your name.',
+    ...(input.takenNow
+      ? [
+          "You've got this one with you already. When you get a",
+          "moment, please pay using the link and we'll mark it off.",
+        ]
+      : [
+          "Once your payment comes through we'll have this ready to",
+          "collect at the club. Bring nothing - we'll match it up with",
+          'your name.',
+        ]),
     '',
     `Questions? ${CONTACT_NAME}`,
     CONTACT_PHONE,
@@ -233,8 +259,7 @@ ${detailRow('Qty', String(input.quantity))}
 
               <p style="margin:0 0 18px 0;font-family:Arial,Helvetica,sans-serif;font-size:15px;
                  line-height:22px;color:${INK};">
-                Once your payment comes through we&rsquo;ll have this ready to collect at the
-                club. Bring nothing &mdash; we&rsquo;ll match it up with your name.
+                ${input.takenNow ? TAKEN_NOW_TEXT : COLLECT_LATER_TEXT}
               </p>
 
               <p style="margin:0 0 24px 0;font-family:Arial,Helvetica,sans-serif;font-size:12px;

@@ -290,6 +290,12 @@ Two things about it are load-bearing:
   movement — because there is nothing in the cupboard to give. The
   confirmation screen switches colour and spells out that the item is
   owed, so a coach mid-queue cannot misread it as complete.
+- **The payment-link path asks "are they taking it now?"** Taking it now
+  writes the order unpaid *and* hands it over (same two-write pattern as
+  cash, so stock drops); collecting later writes it unpaid and leaves
+  stock alone. The question is skipped entirely on a back-order, where
+  there is nothing to take. Taking it now is what creates the
+  unpaid-but-handed-over combination described under Route structure.
 
 `stock_items.image_url` / `wix_product_url` (migration
 `20260920000002_sell_flow.sql`) feed the product grid and the "send
@@ -336,11 +342,19 @@ by a signed-in coach — and it is deliberately not admin-only.
 - `app/[section]/page.tsx` — dynamic route for `stock` | `restock` |
   `orders`, all rendered by the same `TrackerSection` client component
   with a `section` prop. Orders (payment status × handover status)
-  collapses to four states — unpaid / ready / waiting on stock / done —
+  collapses to five states — unpaid / has gear, unpaid / ready / waiting
+  on stock / done —
   via `classifyOrder()` in `TrackerSection.tsx`; there's no separate
   Handovers route or table column for this, it's derived from
   `payment_status`, `distributed_at`, and the matching stock item's
-  `on_hand` every render.
+  `on_hand` every render. **`classifyOrder()` tests payment before
+  handover, and that order is load-bearing**: it used to check
+  `distributed_at` first and return `done`, which filed an
+  unpaid-but-handed-over order under "nothing to do" — exactly the debt
+  worth chasing. Nothing could produce that combination until `/sell`
+  grew its "taking it now" option, so it never appeared in the data;
+  it would have the moment that shipped. `refunded` counts as not paid,
+  so a refunded, handed-over order reads as owing rather than done.
 - `app/admin/page.tsx` — committee member management, admin-only (see
   access control above).
 - `app/page.tsx` — home tiles (`HomeTiles.tsx`) linking into the sections.

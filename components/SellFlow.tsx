@@ -14,7 +14,7 @@ export interface SellItem {
   wix_product_url: string | null;
 }
 
-type Step = 'product' | 'size' | 'who' | 'pay' | 'done';
+type Step = 'product' | 'size' | 'who' | 'pay' | 'timing' | 'done';
 
 interface Sale {
   productName: string;
@@ -22,6 +22,8 @@ interface Sale {
   customerName: string;
   price: number;
   method: 'cash' | 'link';
+  /** Payment-link sales only: did they walk away with it? */
+  takenNow: boolean;
   backorder: boolean;
   paymentUrl: string | null;
   handoverFailed: boolean;
@@ -45,7 +47,11 @@ const STEP_LABELS: Array<[Step, string]> = [
   ['pay', 'Pay'],
 ];
 
+// 'timing' is a sub-question of the Pay step rather than a fifth dot,
+// so the progress row does not grow a label for it and does not appear
+// to go backwards when the question opens.
 function stepIndex(step: Step): number {
+  if (step === 'timing') return STEP_LABELS.findIndex(([s]) => s === 'pay');
   return STEP_LABELS.findIndex(([s]) => s === step);
 }
 
@@ -120,7 +126,7 @@ export default function SellFlow({
     }
   }
 
-  async function record(method: 'cash' | 'link') {
+  async function record(method: 'cash' | 'link', takenNow = false) {
     if (!chosen || !product) return;
     const name = customer.trim();
     if (!name) {
@@ -134,6 +140,10 @@ export default function SellFlow({
 
     const backorder = chosen.available <= 0;
     const now = new Date().toISOString();
+    // Cash always leaves with them. A payment-link sale only does when
+    // the coach said so — and never on a back-order, where there is
+    // nothing in the cupboard to walk away with.
+    const handedOver = (method === 'cash' || takenNow) && !backorder;
 
     // Cash takes the money now; a payment link leaves it owing. The
     // method records what the money did, so a link is 'online' even
@@ -168,13 +178,16 @@ export default function SellFlow({
     // A back-order is deliberately NOT handed over: there is nothing in
     // the cupboard to give, so it stays owed and stock stays put.
     let handoverFailed = false;
-    if (method === 'cash' && !backorder) {
+    if (handedOver) {
       const { error: handoverError } = await supabase
         .from('orders')
         .update({
           distributed_at: now,
           handed_over_by: sellerInitials,
-          handover_note: 'Sold at the ground',
+          handover_note:
+            method === 'cash'
+              ? 'Sold at the ground'
+              : 'Taken at the ground, paying online',
         })
         .eq('id', data.id);
       handoverFailed = !!handoverError;
@@ -212,6 +225,7 @@ export default function SellFlow({
       customerName: name,
       price: chosen.price,
       method,
+      takenNow: handedOver && method === 'link',
       backorder,
       paymentUrl: chosen.wix_product_url,
       handoverFailed,
@@ -239,7 +253,7 @@ export default function SellFlow({
           {STEP_LABELS.map(([s, label], i) => (
             <li
               key={s}
-              data-state={step === s ? 'now' : stepIndex(step) > i ? 'done' : 'todo'}
+              data-state={stepIndex(step) === i ? 'now' : stepIndex(step) > i ? 'done' : 'todo'}
             >
               {label}
             </li>
@@ -422,11 +436,44 @@ export default function SellFlow({
           <button
             className="sell-secondary sell-big"
             disabled={busy}
-            onClick={() => record('link')}
+            onClick={() => {
+              // Nothing in the cupboard means nothing to take now, so
+              // the question would be a trap. Record it as owed.
+              if (chosen.available <= 0) record('link');
+              else setStep('timing');
+            }}
           >
             {busy ? 'Saving…' : 'Send payment link'}
           </button>
           <button className="sell-ghost" onClick={() => setStep('who')}>
+            &larr; Back
+          </button>
+        </section>
+      )}
+
+      {step === 'timing' && chosen && (
+        <section>
+          <h2 className="sell-h">Are they taking it now?</h2>
+          <p className="sell-sub">
+            {chosen.name} · {chosen.size} · {money(chosen.price)} · {customer.trim()}
+          </p>
+          <button
+            className="sell-primary sell-big"
+            disabled={busy}
+            onClick={() => record('link', true)}
+          >
+            {busy ? 'Saving…' : 'Taking it now'}
+            <span className="sell-btn-sub">They walk away with it · pays online after</span>
+          </button>
+          <button
+            className="sell-secondary sell-big"
+            disabled={busy}
+            onClick={() => record('link', false)}
+          >
+            {busy ? 'Saving…' : 'Collecting later'}
+            <span className="sell-btn-sub">We hold it until payment comes through</span>
+          </button>
+          <button className="sell-ghost" onClick={() => setStep('pay')}>
             &larr; Back
           </button>
         </section>
@@ -443,7 +490,9 @@ export default function SellFlow({
                 ? 'OWED — not handed over'
                 : sale.method === 'cash'
                   ? 'Handed over'
-                  : 'Awaiting payment'}
+                  : sale.takenNow
+                    ? 'TAKEN — payment owed'
+                    : 'Awaiting payment'}
             </span>
             <h2 className="sell-done-title">
               {sale.productName} · {sale.size}
@@ -460,6 +509,14 @@ export default function SellFlow({
                 Nothing was handed over. {sale.customerName} is still owed one{' '}
                 {sale.productName} in {sale.size}. It shows in Orders as waiting
                 on stock.
+              </p>
+            )}
+
+            {sale.takenNow && (
+              <p className="sell-done-warn">
+                {sale.customerName} has taken this with them and still owes{' '}
+                {money(sale.price)}. It shows in Orders under
+                &ldquo;Has gear, unpaid&rdquo; until the payment lands.
               </p>
             )}
 

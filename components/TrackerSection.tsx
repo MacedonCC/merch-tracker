@@ -212,17 +212,29 @@ function groupStock(rows: StockRow[]): StockGroup[] {
 }
 
 // Each order has two independent facts — paid or not, handed over or
-// not — but the four things a helper actually cares about collapse
-// those into one state: an unpaid order is "unpaid" regardless of
-// stock; a paid, handed-over order is "done" regardless of how it got
-// there (including the unreachable-via-this-UI 'refunded' status,
-// which falls back to "unpaid" here since nothing in the app ever sets
-// it and it doesn't fit any of the four named buckets).
-type OrderState = 'unpaid' | 'ready' | 'waiting' | 'done';
+// not — which is four combinations, and each one is now a named state:
+//
+//   not paid, not handed over  -> unpaid            (chase the money)
+//   paid,     not handed over  -> ready | waiting   (depending on stock)
+//   not paid, handed over      -> owing             (they have it, chase the money)
+//   paid,     handed over      -> done
+//
+// PAYMENT IS TESTED BEFORE HANDOVER, and that order matters. This used
+// to read `if (o.distributed_at) return 'done'` first, which filed an
+// unpaid-but-handed-over order under "nothing to do" — precisely the
+// debt most worth chasing. Nothing could create that combination until
+// /sell grew a "taking it now" option, so it never showed up in the
+// data; it would have the moment the option shipped.
+//
+// 'refunded' counts as not paid here, same as 'pending'. Nothing in the
+// app sets it, so this is theoretical, but a refunded order that was
+// handed over now reads as owing rather than done.
+type OrderState = 'unpaid' | 'owing' | 'ready' | 'waiting' | 'done';
 
 function classifyOrder(o: OrderRow, byId: Map<string, StockRow>): OrderState {
-  if (o.distributed_at) return 'done';
-  if (o.payment_status === 'paid') {
+  const paid = o.payment_status === 'paid';
+  if (o.distributed_at) return paid ? 'done' : 'owing';
+  if (paid) {
     const s = o.stock_item_id ? byId.get(o.stock_item_id) : null;
     const onHand = s ? s.on_hand : 0;
     return onHand >= o.quantity ? 'ready' : 'waiting';
@@ -230,9 +242,12 @@ function classifyOrder(o: OrderRow, byId: Map<string, StockRow>): OrderState {
   return 'unpaid';
 }
 
+// Ordered so the two money-chasing states sit together on the left and
+// the two stock-handling states in the middle.
 const CHIPS: { key: 'all' | OrderState; label: string }[] = [
   { key: 'all', label: 'All' },
   { key: 'unpaid', label: 'Unpaid' },
+  { key: 'owing', label: 'Has gear, unpaid' },
   { key: 'ready', label: 'Ready' },
   { key: 'waiting', label: 'Waiting on stock' },
   { key: 'done', label: 'Done' },
@@ -504,6 +519,7 @@ export default function TrackerSection({
   const orderCounts = {
     all: classifiedOrders.length,
     unpaid: classifiedOrders.filter((c) => c.state === 'unpaid').length,
+    owing: classifiedOrders.filter((c) => c.state === 'owing').length,
     ready: classifiedOrders.filter((c) => c.state === 'ready').length,
     waiting: classifiedOrders.filter((c) => c.state === 'waiting').length,
     done: classifiedOrders.filter((c) => c.state === 'done').length,
@@ -803,6 +819,17 @@ export default function TrackerSection({
                     <td className="orders-date">{formatDate(o.ordered_at)}</td>
                     <td>
                       {state === 'unpaid' && <span className="pill pill-out">Unpaid</span>}
+                      {state === 'owing' && (
+                        <>
+                          <span className="pill pill-out">Has gear, unpaid</span>
+                          {/* Same by/when line as Done: seeing when they
+                              took it is the useful bit when chasing. */}
+                          <div style={{ fontSize: '0.75rem', color: 'var(--ink-faint)', marginTop: 4 }}>
+                            {o.handed_over_by && <>by {o.handed_over_by} </>}
+                            {o.distributed_at && <>· {formatDate(o.distributed_at)}</>}
+                          </div>
+                        </>
+                      )}
                       {state === 'ready' && <span className="pill pill-ok">Ready</span>}
                       {state === 'waiting' && <span className="pill pill-low">Waiting on stock</span>}
                       {state === 'done' && (
@@ -821,7 +848,7 @@ export default function TrackerSection({
                       )}
                     </td>
                     <td className="orders-action">
-                      {state === 'unpaid' && (
+                      {(state === 'unpaid' || state === 'owing') && (
                         <button className="btn-mini" onClick={() => markPaid(o.id)}>Mark paid</button>
                       )}
                       {state === 'ready' && (
