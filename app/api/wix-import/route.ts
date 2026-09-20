@@ -50,6 +50,11 @@ interface WixProduct {
    *  product, so `variants` comes back empty even with
    *  includeVariants: true and there is no variant id to link to. */
   manageVariants?: boolean;
+  /** When Wix last changed this product. If the shop shows an edit that
+   *  this timestamp predates, the API is serving a stale catalogue and
+   *  the problem is upstream of this route. */
+  lastUpdated?: string;
+  numericId?: string;
   priceData?: { price?: number };
   productOptions?: Array<{ name?: string; choices?: Array<{ value?: string }> }>;
   variants?: WixVariant[];
@@ -143,6 +148,10 @@ export async function GET(req: NextRequest) {
   }
 
   const dryRun = req.nextUrl.searchParams.get('dryRun') === '1';
+  // ?raw=1 returns what Wix actually sent - every product name, when it
+  // was last changed, and its size choices - and nothing else. Use it
+  // when the catalogue in the API disagrees with the live shop.
+  const raw = req.nextUrl.searchParams.get('raw') === '1';
 
   const res = await fetch('https://www.wixapis.com/stores/v1/products/query', {
     method: 'POST',
@@ -152,6 +161,12 @@ export async function GET(req: NextRequest) {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({ query: { paging: { limit: 100 } }, includeVariants: true }),
+    // See lib/no-store-fetch.ts for why this matters in this codebase:
+    // Next's Data Cache has served stale responses to routes that
+    // looked dynamic. This is a POST so it should not be cached, but
+    // the cost of being explicit is nil and it removes one suspect when
+    // the catalogue looks out of date.
+    cache: 'no-store',
   });
 
   if (!res.ok) {
@@ -165,14 +180,92 @@ export async function GET(req: NextRequest) {
   const data = await res.json();
   const products: WixProduct[] = data.products ?? [];
 
+  if (raw) {
+    return NextResponse.json({
+      ok: true,
+      fetchedAt: new Date().toISOString(),
+      productsFound: products.length,
+      products: products.map((p) => ({
+        name: p.name,
+        id: p.id,
+        lastUpdated: p.lastUpdated ?? '(not returned)',
+        manageVariants: p.manageVariants ?? '(not returned)',
+        sizeChoices:
+          (p.productOptions ?? [])
+            .filter((o) => /size/i.test(o.name ?? ''))
+            .flatMap((o) => (o.choices ?? []).map((c) => c.value)) ?? [],
+        variantsReturned: (p.variants ?? []).length,
+      })),
+    });
+  }
+
   const supabase = createAdminSupabase();
   const { data: stock } = await supabase
     .from('stock_items')
     .select('id, name, size, price, quantity, wix_product_id, wix_variant_id');
 
   const rows = (stock ?? []) as StockRow[];
+
+  // MATCH ORDER: variant id, then product id, then name + size.
+  //
+  // Identity beats spelling. A product renamed in Wix keeps its id, so
+  // an id match survives a rename; a name match does not, and would
+  // treat every size of the renamed product as new and create a full
+  // set of empty duplicates.
+  //
+  // The product-id map only holds products where exactly ONE tracker
+  // row carries that id, mirroring wix-sync: when several sizes share a
+  // product id, matching on the id alone would bind whichever row
+  // happened to be indexed last.
+  const byVariant = new Map<string, StockRow>();
+  const byProduct = new Map<string, StockRow>();
   const byKey = new Map<string, StockRow>();
-  for (const r of rows) byKey.set(nameSizeKey(r.name, r.size), r);
+  const productIdCounts = new Map<string, number>();
+
+  for (const r of rows) {
+    if (r.wix_product_id) {
+      productIdCounts.set(r.wix_product_id, (productIdCounts.get(r.wix_product_id) ?? 0) + 1);
+      if (r.wix_variant_id) byVariant.set(`${r.wix_product_id}::${r.wix_variant_id}`, r);
+    }
+    byKey.set(nameSizeKey(r.name, r.size), r);
+  }
+  for (const r of rows) {
+    if (r.wix_product_id && productIdCounts.get(r.wix_product_id) === 1) {
+      byProduct.set(r.wix_product_id, r);
+    }
+  }
+
+  // A row already linked to a DIFFERENT Wix product must not be stolen
+  // by a name collision, and one row must not be claimed twice.
+  const consumed = new Set<string>();
+  const conflicts: string[] = [];
+
+  function findRow(entry: CatalogueEntry): StockRow | undefined {
+    const viaVariant = entry.variantId
+      ? byVariant.get(`${entry.productId}::${entry.variantId}`)
+      : undefined;
+    const viaProduct =
+      productIdCounts.get(entry.productId) === 1 ? byProduct.get(entry.productId) : undefined;
+    const viaName = byKey.get(nameSizeKey(entry.productName, entry.size));
+
+    const row = viaVariant ?? viaProduct ?? viaName;
+    if (!row) return undefined;
+
+    if (consumed.has(row.id)) {
+      conflicts.push(`${entry.productName} / ${entry.size}: row already matched by another Wix entry`);
+      return undefined;
+    }
+    // Only the name fallback can cross products; an id match is by
+    // definition the right product.
+    if (!viaVariant && !viaProduct && row.wix_product_id && row.wix_product_id !== entry.productId) {
+      conflicts.push(
+        `${entry.productName} / ${entry.size}: name matches "${row.name} / ${row.size}", which is linked to a different Wix product`
+      );
+      return undefined;
+    }
+    consumed.add(row.id);
+    return row;
+  }
 
   // Collected in dry-run mode only, to show why a product yielded no
   // variant id rather than leaving it to guesswork.
@@ -226,7 +319,7 @@ export async function GET(req: NextRequest) {
       }
       claimed.set(key, entry.size);
 
-      const existing = byKey.get(key);
+      const existing = findRow(entry);
 
       if (!existing) {
         toCreate.push({
@@ -304,7 +397,8 @@ export async function GET(req: NextRequest) {
       toCreate: toCreate.length,
       unchanged: unchanged.length,
       skippedAsFees: skippedAsFees.length,
-      duplicateWixSizes: duplicateWixSizes.length,
+        duplicateWixSizes: duplicateWixSizes.length,
+      conflicts: conflicts.length,
       failed: failed.length,
     },
     toLink,
@@ -313,6 +407,7 @@ export async function GET(req: NextRequest) {
     skippedAsFees: Array.from(new Set(skippedAsFees)),
     ...(dryRun ? { wixDiagnostics } : {}),
     duplicateWixSizes,
+    conflicts,
     failed,
   });
 }
