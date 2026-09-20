@@ -628,3 +628,10 @@ button.matrix-line:hover { background-color: var(--tint); }
   .sell { max-width: none; }
   .shell { padding: 1.25rem 1rem 3rem; }
 }
+
+/* Email outcome on the /sell confirmation. Success is quiet; failure
+   reuses .sell-done-warn so it reads with the same urgency as a failed
+   handover, since both need the coach to do something by hand. */
+.sell-done-sent {
+  margin-top: 4px; font-size: 0.95rem; color: var(--ink-soft);
+}

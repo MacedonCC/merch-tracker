@@ -303,6 +303,34 @@ registration, not merchandise.
 default to `unknown`; every Wix row is `online` (backfilled, and set on
 import).
 
+**The payment-link email** (`app/api/send-payment-link/route.ts`,
+template in `lib/payment-link-email.ts`) goes out over Gmail SMTP via
+nodemailer, using `GMAIL_USER` / `GMAIL_APP_PASSWORD`. Four things about
+it are deliberate:
+
+- It runs **after** the order is already written, and never returns a
+  non-2xx for a send failure — it answers `{ sent: false, reason }` so
+  the UI can say "saved, but the email didn't send" and offer the link
+  to copy. A sale must never be lost because SMTP was down.
+- It re-reads the order and stock item **from the database by id**
+  rather than trusting the product, size or price the browser posted.
+- The logo is attached by CID, not linked, since most clients block
+  remote images. `public/` is served by the CDN and is not otherwise
+  traced into the serverless bundle, so `next.config.js` names it in
+  `experimental.outputFileTracingIncludes` for this route. The read is
+  still best-effort: a miss drops the logo, not the email.
+- The copy must **not** say the item is reserved. A payment-link sale is
+  `pending`, and `stock_overview` counts only `paid` orders as
+  `committed`, so nothing is actually held and another coach can sell
+  the last one. Saying otherwise would be a promise the schema does not
+  keep — changing that would mean counting pending orders in
+  `committed`, which moves `available`, `stock_status` and
+  `suggested_order` everywhere.
+
+Auth follows the committee-action pattern (cookie-bound client,
+`getCurrentMember()`), not the `CRON_SECRET` pattern — it is triggered
+by a signed-in coach — and it is deliberately not admin-only.
+
 ### Route structure
 
 - `app/[section]/page.tsx` — dynamic route for `stock` | `restock` |

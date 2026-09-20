@@ -25,6 +25,10 @@ interface Sale {
   backorder: boolean;
   paymentUrl: string | null;
   handoverFailed: boolean;
+  /** null when no email was attempted (no address, or no shop link). */
+  emailTo: string | null;
+  emailSent: boolean;
+  emailReason: string | null;
 }
 
 interface Product {
@@ -176,6 +180,31 @@ export default function SellFlow({
       handoverFailed = !!handoverError;
     }
 
+    // Email the shop link, but only when there is something to send and
+    // somewhere to send it. The order is already saved by this point, so
+    // a mail failure is reported and never rolls anything back — losing
+    // a sale because SMTP was down would be far worse than a parent
+    // having to be sent the link by text.
+    const address = email.trim();
+    const shouldEmail = method === 'link' && !!address && !!chosen.wix_product_url;
+    let emailSent = false;
+    let emailReason: string | null = null;
+
+    if (shouldEmail) {
+      try {
+        const res = await fetch('/api/send-payment-link', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ orderId: data.id }),
+        });
+        const result = await res.json();
+        emailSent = !!result.sent;
+        if (!emailSent) emailReason = result.reason ?? result.error ?? 'Sending failed.';
+      } catch {
+        emailReason = 'No connection while sending.';
+      }
+    }
+
     setBusy(false);
     setSale({
       productName: product.name,
@@ -186,6 +215,9 @@ export default function SellFlow({
       backorder,
       paymentUrl: chosen.wix_product_url,
       handoverFailed,
+      emailTo: shouldEmail ? address : null,
+      emailSent,
+      emailReason,
     });
     setStep('done');
   }
@@ -435,6 +467,18 @@ export default function SellFlow({
               <p className="sell-done-warn">
                 The sale was recorded, but marking it handed over failed. Open
                 Orders and hand it over there, or stock will be wrong.
+              </p>
+            )}
+
+            {sale.emailTo && sale.emailSent && (
+              <p className="sell-done-sent">Payment link emailed to {sale.emailTo}</p>
+            )}
+
+            {sale.emailTo && !sale.emailSent && (
+              <p className="sell-done-warn">
+                The order is saved, but the email did not send
+                {sale.emailReason ? ` (${sale.emailReason})` : ''}. Copy the link
+                below and text it to them instead.
               </p>
             )}
           </div>
