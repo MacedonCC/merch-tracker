@@ -432,7 +432,7 @@ by a signed-in coach — and it is deliberately not admin-only.
   with a `section` prop. Orders (payment status × handover status)
   collapses to five states — unpaid / has gear, unpaid / ready / waiting
   on stock / done —
-  via `classifyOrder()` in `TrackerSection.tsx`; there's no separate
+  via `classifyOrders()` in `TrackerSection.tsx`; there's no separate
   Handovers route or table column for this, it's derived from
   `payment_status`, `distributed_at`, and the matching stock item's
   `on_hand` every render. **`classifyOrder()` tests payment before
@@ -443,6 +443,14 @@ by a signed-in coach — and it is deliberately not admin-only.
   grew its "taking it now" option, so it never appeared in the data;
   it would have the moment that shipped. `refunded` counts as not paid,
   so a refunded, handed-over order reads as owing rather than done.
+  **Ready vs waiting is a queue, not a per-row test.** Stock is
+  allocated oldest order first, so an order is Ready only if enough is
+  on hand *after every earlier order for the same size* has taken its
+  share. This is why the whole list is classified in one pass rather
+  than each row independently: the old per-row version asked "is there
+  enough for this order?" and answered yes for two orders sharing one
+  garment. "Hand over all" needs no separate rule — it is built from
+  rows already classified Ready.
 - `app/admin/page.tsx` — committee member management, admin-only (see
   access control above).
 - `app/page.tsx` — home tiles (`HomeTiles.tsx`) linking into the sections.

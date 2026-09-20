@@ -335,15 +335,59 @@ function groupStock(rows: StockRow[]): StockGroup[] {
 // handed over now reads as owing rather than done.
 type OrderState = 'unpaid' | 'owing' | 'ready' | 'waiting' | 'done';
 
-function classifyOrder(o: OrderRow, byId: Map<string, StockRow>): OrderState {
-  const paid = o.payment_status === 'paid';
-  if (o.distributed_at) return paid ? 'done' : 'owing';
-  if (paid) {
-    const s = o.stock_item_id ? byId.get(o.stock_item_id) : null;
-    const onHand = s ? s.on_hand : 0;
-    return onHand >= o.quantity ? 'ready' : 'waiting';
+// Ready vs waiting is a question about a QUEUE, not about one order,
+// so the whole list is classified at once rather than each row on its
+// own. The previous version asked "is there enough on hand for this
+// order?" independently for every row, which meant two orders for the
+// same size both read as Ready off a single garment: the first person
+// to arrive would take it and the second would find an empty cupboard
+// and a screen still promising it was there.
+//
+// Stock is allocated oldest order first. Each paid, not-yet-handed-over
+// order claims what it needs from what is left after every earlier
+// order for the same size, so exactly as many rows say Ready as there
+// are garments to satisfy them. Ties break on id so the order is
+// stable between renders.
+//
+// "Hand over all" needs no separate rule: it is built from the rows
+// already classified Ready, so it can only ever hand over what has
+// actually been allocated.
+function classifyOrders(
+  orders: OrderRow[],
+  byId: Map<string, StockRow>
+): Map<string, OrderState> {
+  const states = new Map<string, OrderState>();
+  const queue: OrderRow[] = [];
+
+  for (const o of orders) {
+    const paid = o.payment_status === 'paid';
+    if (o.distributed_at) states.set(o.id, paid ? 'done' : 'owing');
+    else if (!paid) states.set(o.id, 'unpaid');
+    else queue.push(o);
   }
-  return 'unpaid';
+
+  queue.sort((a, b) => {
+    const t = new Date(a.ordered_at).getTime() - new Date(b.ordered_at).getTime();
+    return t !== 0 ? t : a.id.localeCompare(b.id);
+  });
+
+  const remaining = new Map<string, number>();
+  for (const o of queue) {
+    const key = o.stock_item_id ?? '';
+    if (!remaining.has(key)) {
+      const s = o.stock_item_id ? byId.get(o.stock_item_id) : null;
+      remaining.set(key, s ? s.on_hand : 0);
+    }
+    const left = remaining.get(key) ?? 0;
+    if (left >= o.quantity) {
+      states.set(o.id, 'ready');
+      remaining.set(key, left - o.quantity);
+    } else {
+      states.set(o.id, 'waiting');
+    }
+  }
+
+  return states;
 }
 
 // Ordered so the two money-chasing states sit together on the left and
@@ -654,7 +698,9 @@ export default function TrackerSection({
   }
 
   // ---- Derived -------------------------------------------------------
-  const byId = new Map(stock.map((s) => [s.id, s]));
+  // Memoised because classifyOrders() takes it as a dependency; a fresh
+  // Map every render would defeat that memo.
+  const byId = useMemo(() => new Map(stock.map((s) => [s.id, s])), [stock]);
 
   // Restock is projected from last season's sales, NOT target_level.
   // target_level is left in place on stock_items and still drives
@@ -778,7 +824,11 @@ export default function TrackerSection({
 
   const isDimmed = (s: StockRow) => Boolean(level) && s.stock_status !== level;
 
-  const classifiedOrders = orders.map((o) => ({ order: o, state: classifyOrder(o, byId) }));
+  const orderStates = useMemo(() => classifyOrders(orders, byId), [orders, byId]);
+  const classifiedOrders = orders.map((o) => ({
+    order: o,
+    state: orderStates.get(o.id) ?? 'unpaid',
+  }));
 
   const orderCounts = {
     all: classifiedOrders.length,
