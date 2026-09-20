@@ -18,10 +18,22 @@
   --radius: 8px;
   --row-alt: #1b2029;
   --row-hover: #212733;
-  --tint-ok: rgba(47, 111, 237, 0.08);
-  --tint-low: rgba(245, 165, 36, 0.15);
+  /* Stock matrix. Each state is a faint tint behind a brighter number
+     of the same hue, so the grid reads as colour blocks at a glance and
+     the figure stays legible on the dark background. Tints sit at low
+     alpha because they stack under text; the text colours are
+     deliberately light rather than saturated, since a mid-tone hue on
+     a near-black panel loses contrast fast.
+     Short (oversold) is purple, well away from Low's blue on the hue
+     circle so the two never read as the same state at a glance - they
+     are the pair most easily confused, being adjacent in severity. */
+  --tint-ok: rgba(61, 201, 122, 0.13);
+  --stock-ok: #6ee7a8;
+  --tint-low: rgba(56, 160, 245, 0.15);
+  --stock-low: #7cc4fb;
   --tint-out: rgba(255, 86, 48, 0.13);
-  --tint-oversold: rgba(255, 86, 48, 0.28);
+  --tint-oversold: rgba(167, 108, 245, 0.20);
+  --stock-oversold: #c4a2fb;
 
   /* Brushed-metal surface: a restrained sheen (lighter top, darker
      bottom, suggesting a light source above), layered as a second
@@ -354,13 +366,16 @@ button.matrix-line:hover { filter: brightness(1.35); }
 button.matrix-line:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .matrix-line-size { font-size: 0.7rem; opacity: 0.75; }
 
-.matrix-ok { --tint: var(--tint-ok); color: var(--ink); }
-.matrix-low { --tint: var(--tint-low); color: var(--warn); }
+.matrix-ok { --tint: var(--tint-ok); color: var(--stock-ok); }
+.matrix-low { --tint: var(--tint-low); color: var(--stock-low); }
 .matrix-out { --tint: var(--tint-out); color: var(--alert); }
-.matrix-oversold { --tint: var(--tint-oversold); color: var(--alert); font-weight: 700; }
+.matrix-oversold { --tint: var(--tint-oversold); color: var(--stock-oversold); font-weight: 700; }
 .matrix-line, .matrix-key { background-color: var(--tint, transparent); }
 button.matrix-line:hover { background-color: var(--tint); }
-.matrix-line.matrix-oversold, .matrix-key.matrix-oversold { box-shadow: inset 0 0 0 1px var(--alert); }
+/* Short keeps its outline, now purple: the ring is what separates it
+   from the plain tints, and it is the only state that means someone is
+   owed something that is not there. */
+.matrix-line.matrix-oversold, .matrix-key.matrix-oversold { box-shadow: inset 0 0 0 1px var(--stock-oversold); }
 
 /* Not made in this size: a faint dash, clearly not a zero. */
 .matrix-none { color: var(--line-strong); }

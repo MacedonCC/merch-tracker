@@ -104,12 +104,20 @@ function authorised(req: NextRequest): boolean {
   return req.headers.get('authorization') === `Bearer ${secret}`;
 }
 
+// Order matters: the narrower words have to be tested before the
+// broader ones. "Club Beanie" contains no "cap", but "Broad Rim Playing
+// Hat" and "MCC Senior Baggy Cap" both need to land somewhere specific,
+// and a single hat/cap rule used to put the broad-rim in with the caps.
+// Keep in step with CATEGORIES in components/TrackerSection.tsx.
 function guessCategory(name: string): string {
   const n = name.toLowerCase();
-  if (n.includes('cap') || n.includes('hat') || n.includes('baggy')) return 'Cap';
+  if (n.includes('beanie')) return 'Beanie';
   if (n.includes('hoodie') || n.includes('hoody')) return 'Hoodie';
   if (n.includes('jacket') || n.includes('vest')) return 'Jacket';
   if (n.includes('short')) return 'Shorts';
+  if (n.includes('pant')) return 'Pants';
+  if (n.includes('cap') || n.includes('baggy')) return 'Cap';
+  if (n.includes('hat')) return 'Hat';
   if (n.includes('shirt') || n.includes('tee') || n.includes('polo') || n.includes('top'))
     return 'T-Shirt';
   return 'Other';

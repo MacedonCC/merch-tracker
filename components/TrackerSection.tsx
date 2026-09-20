@@ -81,7 +81,10 @@ function RowMenu({ actions }: { actions: { label: string; onClick: () => void }[
 
 export type Section = 'stock' | 'restock' | 'orders';
 
-const CATEGORIES = ['T-Shirt', 'Hoodie', 'Cap', 'Jacket', 'Shorts', 'Other'];
+// Must stay in step with guessCategory() in app/api/wix-import, which
+// assigns one of these to any line it creates. A category the dropdown
+// does not list would be invisible to the Stock page filter.
+const CATEGORIES = ['T-Shirt', 'Hoodie', 'Jacket', 'Shorts', 'Pants', 'Cap', 'Hat', 'Beanie', 'Other'];
 const SIZES = ['JNR8', 'JNR10', 'JNR12', 'JNR14', 'JNR16', 'XS', 'S', 'M', 'L', 'XL', '2XL', '3XL', '4XL', 'Small', 'Medium', 'Large', 'One size'];
 
 interface StockRow {
@@ -959,7 +962,7 @@ export default function TrackerSection({
               <option value="ok">In stock</option>
               <option value="low">Low</option>
               <option value="out">None left</option>
-              <option value="oversold">Oversold</option>
+              <option value="oversold">Short</option>
             </select>
           </div>
           {visibleGroups.length === 0 ? (
@@ -1008,7 +1011,7 @@ export default function TrackerSection({
                 <span className="matrix-key matrix-ok">In stock</span>
                 <span className="matrix-key matrix-low">Low</span>
                 <span className="matrix-key matrix-out">None left</span>
-                <span className="matrix-key matrix-oversold">Oversold</span>
+                <span className="matrix-key matrix-oversold">Short</span>
                 <span className="matrix-key"><span className="matrix-none">–</span> Not made in that size</span>
               </div>
             </>
