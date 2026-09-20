@@ -1,137 +1,53 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { createAdminSupabase } from '@/lib/supabase-server';
+import { NextResponse } from 'next/server';
 
-// Pulls current stock counts out of the Wix inventory and writes them into the
-// tracker. Run it whenever you want to reset the tracker's numbers to match Wix.
+// RETIRED — this route used to overwrite stock_items.quantity with
+// whatever Wix reported. It now answers 410 Gone and writes nothing.
 //
-// This overwrites quantities. If you have corrected a count by hand in the
-// tracker, running this will replace it with whatever Wix says.
+// Two reasons it had to go:
+//
+// 1. The tracker is the source of truth for stock. Counts come from a
+//    physical stocktake and from handovers recorded through /sell and
+//    the Orders page, each of which logs a stock_movements row. Wix
+//    knows what is for sale, not what is in the cupboard, so importing
+//    its numbers would silently overwrite a real count with a guess.
+//
+// 2. Wix inventory tracking is off for almost the whole catalogue. The
+//    products query reports "stock": { "trackQuantity": false } on
+//    product after product, and this route treated an untracked product
+//    as "leave alone" but a tracked one as authoritative. Playing Cap
+//    (one size fits all) is the one product with trackQuantity: true,
+//    and Wix says 15 where the tracker says 16 — so the single line it
+//    could act on is the single line where the two already disagree.
+//
+// It was already failing in practice: check_stock_item_update rejects a
+// quantity write from a caller with no signed-in member, and this route
+// uses the service-role client. Verified against the live database —
+// the update raises "Not authorised to update stock items." So the
+// route has been erroring rather than corrupting anything. 410 makes
+// that deliberate and explains itself, instead of leaving a loaded
+// route that would start working again the moment someone widened the
+// trigger's exemption.
+//
+// To correct a count, use Adjust on the Stock page (needs
+// can_adjust_stock), which records the change in stock_movements.
 
 export const dynamic = 'force-dynamic';
-export const maxDuration = 60;
 
-interface WixInventoryVariant {
-  variantId?: string;
-  inStock?: boolean;
-  quantity?: number;
-  trackQuantity?: boolean;
+const GONE = {
+  error: 'This route has been retired.',
+  reason:
+    'The tracker is the source of truth for stock levels, and Wix inventory ' +
+    'tracking is switched off for almost every product. Importing Wix counts ' +
+    'would overwrite real stocktake numbers with guesses.',
+  instead:
+    'Correct a count with Adjust on the Stock page, which logs the change to ' +
+    'stock_movements. Order history still syncs automatically via /api/wix-sync.',
+};
+
+export async function GET() {
+  return NextResponse.json(GONE, { status: 410 });
 }
 
-interface WixInventoryItem {
-  productId?: string;
-  trackInventory?: boolean;
-  variants?: WixInventoryVariant[];
-}
-
-function authorised(req: NextRequest): boolean {
-  const secret = process.env.CRON_SECRET;
-  if (!secret) return false;
-  return req.headers.get('authorization') === `Bearer ${secret}`;
-}
-
-export async function GET(req: NextRequest) {
-  if (!authorised(req)) {
-    return NextResponse.json({ error: 'Not authorised' }, { status: 401 });
-  }
-
-  if (!process.env.WIX_API_KEY || !process.env.WIX_SITE_ID) {
-    return NextResponse.json({ error: 'Wix is not connected yet.' }, { status: 400 });
-  }
-
-  const res = await fetch('https://www.wixapis.com/stores/v2/inventoryItems/query', {
-    method: 'POST',
-    headers: {
-      Authorization: process.env.WIX_API_KEY,
-      'wix-site-id': process.env.WIX_SITE_ID,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ query: { paging: { limit: 100 } } }),
-  });
-
-  if (!res.ok) {
-    const detail = await res.text();
-    return NextResponse.json(
-      { error: `Wix returned ${res.status}`, detail: detail.slice(0, 400) },
-      { status: 502 }
-    );
-  }
-
-  const data = await res.json();
-  const inventory: WixInventoryItem[] = data.inventoryItems ?? [];
-
-  const supabase = createAdminSupabase();
-
-  const { data: stock } = await supabase
-    .from('stock_items')
-    .select('id, name, size, quantity, wix_product_id, wix_variant_id');
-
-  type Row = {
-    id: string; name: string; size: string; quantity: number;
-    wix_product_id: string | null; wix_variant_id: string | null;
-  };
-  const rows = (stock ?? []) as Row[];
-
-  const updated: string[] = [];
-  const untracked: string[] = [];
-  const noMatch: string[] = [];
-
-  for (const item of inventory) {
-    if (!item.productId) continue;
-
-    for (const v of item.variants ?? []) {
-      // Find the tracker row for this Wix variant.
-      const match =
-        rows.find(
-          (r) => r.wix_product_id === item.productId && r.wix_variant_id === v.variantId
-        ) ??
-        rows.find(
-          (r) => r.wix_product_id === item.productId && !r.wix_variant_id
-        );
-
-      if (!match) {
-        noMatch.push(`${item.productId} / ${v.variantId ?? 'default'}`);
-        continue;
-      }
-
-      // Wix only reports a number when quantity tracking is switched on.
-      if (v.trackQuantity !== true || typeof v.quantity !== 'number') {
-        untracked.push(`${match.name} / ${match.size}`);
-        continue;
-      }
-
-      const newQty = Math.max(0, v.quantity);
-      const diff = newQty - match.quantity;
-
-      const { error } = await supabase
-        .from('stock_items')
-        .update({ quantity: newQty, updated_at: new Date().toISOString() })
-        .eq('id', match.id);
-
-      if (!error) {
-        updated.push(`${match.name} / ${match.size}: ${match.quantity} → ${newQty}`);
-
-        if (diff !== 0) {
-          await supabase.from('stock_movements').insert({
-            stock_item_id: match.id,
-            change: diff,
-            reason: 'Imported from Wix inventory',
-            created_by: 'wix-inventory-sync',
-          });
-        }
-      }
-    }
-  }
-
-  return NextResponse.json({
-    ok: true,
-    inventoryItemsFound: inventory.length,
-    quantitiesUpdated: updated.length,
-    updated,
-    notTrackedInWix: Array.from(new Set(untracked)),
-    couldNotMatch: noMatch.length,
-    note:
-      untracked.length > 0
-        ? 'Some items do not have quantity tracking switched on in Wix, so they were left at their current count. Set those by hand.'
-        : 'All matched items updated.',
-  });
+export async function POST() {
+  return NextResponse.json(GONE, { status: 410 });
 }

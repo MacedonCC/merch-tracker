@@ -184,8 +184,11 @@ Two different auth patterns are used depending on who calls the route:
   check the signed-in user via `requireAdmin()` (`lib/member.ts`), using the
   cookie-bound client, before doing anything with the service-role client.
 - **Cron/webhook-style routes** (`app/api/wix-sync`, `wix-import`,
-  `wix-inventory`, `wix-media`): check a bearer token against
-  `CRON_SECRET`, since there's no signed-in user.
+  `wix-media`): check a bearer token against `CRON_SECRET`, since
+  there's no signed-in user. `wix-inventory` is **retired** and answers
+  410 — the tracker is the source of truth for stock, Wix inventory
+  tracking is off for almost the whole catalogue, and
+  `check_stock_item_update` refused its writes anyway.
 
 **`middleware.ts` excludes all of `api/` from the matcher, and must keep
 doing so.** Middleware redirects an unauthenticated request to `/login`,
