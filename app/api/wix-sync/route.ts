@@ -25,10 +25,11 @@ import { createAdminSupabase } from '@/lib/supabase-server';
 // as insert-then-update instead, the UPDATE would fire the trigger and
 // wrongly reduce stock a second time.
 //
-// migration-002 isn't in this repo (see supabase/MIGRATIONS.md), so
-// this reasoning is based on its documented intent, not a direct read
-// of the live trigger definition — worth confirming against the
-// actual trigger in Supabase before relying on it in production.
+// migration-002 isn't in this repo (see supabase/MIGRATIONS.md), but
+// the reasoning above has since been confirmed by reading the live
+// trigger definitions in Supabase: on_distribution_change is the only
+// stock-deducting trigger on `orders`, it is AFTER UPDATE, and there
+// is no INSERT trigger at all.
 //
 // PERFORMANCE: this does exactly 3 Supabase calls total, regardless
 // of how many orders are imported — one read of existing (wix_order_id,
