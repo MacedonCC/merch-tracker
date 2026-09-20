@@ -48,6 +48,10 @@ export interface PushResult {
     linesConsidered: number;
     wouldBlock: number;
     wouldStayOnSale: number;
+    /** Lines whose Wix value would actually move, or that are not yet
+     *  tracked. Zero means the shop already agrees with the tracker. */
+    wouldChange: number;
+    newlyTracked: number;
     productsTouched: number;
     skipped: number;
     failed: number;
@@ -118,7 +122,7 @@ export async function pushAvailableToWix(opts: {
   if (!process.env.WIX_API_KEY || !process.env.WIX_SITE_ID) {
     return {
       ok: false, wrote: false, reason: 'Wix is not connected.',
-      counts: { linesConsidered: 0, wouldBlock: 0, wouldStayOnSale: 0, productsTouched: 0, skipped: 0, failed: 0 },
+      counts: { linesConsidered: 0, wouldBlock: 0, wouldStayOnSale: 0, wouldChange: 0, newlyTracked: 0, productsTouched: 0, skipped: 0, failed: 0 },
       lines: [], skipped, failures,
     };
   }
@@ -140,7 +144,7 @@ export async function pushAvailableToWix(opts: {
     return {
       ok: false, wrote: false,
       reason: `Could not read Wix inventory (HTTP ${inv.status}).`,
-      counts: { linesConsidered: 0, wouldBlock: 0, wouldStayOnSale: 0, productsTouched: 0, skipped: 0, failed: 1 },
+      counts: { linesConsidered: 0, wouldBlock: 0, wouldStayOnSale: 0, wouldChange: 0, newlyTracked: 0, productsTouched: 0, skipped: 0, failed: 1 },
       lines: [], skipped, failures: [JSON.stringify(inv.body).slice(0, 300)],
     };
   }
@@ -198,6 +202,8 @@ export async function pushAvailableToWix(opts: {
     linesConsidered: lines.length,
     wouldBlock: lines.filter((l) => l.setTo === 0).length,
     wouldStayOnSale: lines.filter((l) => l.setTo > 0).length,
+    wouldChange: lines.filter((l) => l.previousQuantity !== l.setTo || l.previousTracked !== true).length,
+    newlyTracked: lines.filter((l) => l.previousTracked !== true).length,
     productsTouched: byProduct.size,
     skipped: skipped.length,
     failed: 0,
@@ -253,19 +259,32 @@ export async function pushAvailableToWix(opts: {
     }
   }
 
+  // Logged even when the push failed, and even when every value already
+  // matched: "did pressing the button do anything?" has to be
+  // answerable from the data, not inferred from silence.
   if (logRows.length > 0) {
-    // Logged even when the push failed: a failed attempt is exactly
-    // when you want to know what was tried.
     const { error } = await supabase.from('wix_stock_pushes').insert(logRows);
+    if (error) failures.push(`push log: ${error.message}`);
+  } else {
+    const { error } = await supabase.from('wix_stock_pushes').insert({
+      stock_item_id: null,
+      quantity: 0,
+      ok: true,
+      error: 'No linked sizes to push.',
+      source: opts.source,
+      pushed_by: opts.pushedBy ?? null,
+    });
     if (error) failures.push(`push log: ${error.message}`);
   }
 
   return {
     ok: counts.failed === 0,
     wrote: true,
-    reason: counts.failed === 0
-      ? `Pushed ${lines.length} sizes across ${byProduct.size} products.`
-      : `Pushed with ${counts.failed} failures.`,
+    reason: counts.failed > 0
+      ? `Pushed ${lines.length} sizes; ${counts.failed} failed.`
+      : counts.wouldChange === 0
+        ? `Nothing to change — all ${lines.length} sizes already matched Wix.`
+        : `Pushed ${lines.length} sizes across ${byProduct.size} products; ${counts.wouldChange} changed.`,
     counts, lines, skipped, failures,
   };
 }

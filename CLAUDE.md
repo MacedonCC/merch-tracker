@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 A Next.js 14 (App Router) app for a sports club committee to track merchandise
 stock, orders, payment/handover status, and committee access. Backed by
-Supabase (Postgres + Auth), deployed on Vercel, with an hourly cron pulling
+Supabase (Postgres + Auth), deployed on Vercel, with a daily cron pulling
 paid orders from a Wix store.
 
 ## Commands
@@ -185,7 +185,19 @@ Two different auth patterns are used depending on who calls the route:
   cookie-bound client, before doing anything with the service-role client.
 - **Cron/webhook-style routes** (`app/api/wix-sync`, `wix-import`,
   `wix-media`): check a bearer token against `CRON_SECRET`, since
-  there's no signed-in user. `wix-inventory` is **retired** and answers
+  there's no signed-in user.
+
+**The cron runs once a day at 09:00 UTC** (`vercel.json`:
+`"0 9 * * *"`). Vercel schedules crons in UTC, never in the project's
+local time, so at the club that is **7pm during AEST and 8pm during
+AEDT** — it shifts an hour when daylight saving starts and ends. It is
+not hourly, whatever older notes said. `/api/wix-sync` is the only
+scheduled route; `wix-import` and `wix-media` are run by hand.
+
+The daily Wix availability push piggybacks on the end of that same
+run (see `lib/wix-push.ts`), so it inherits the same time and, more
+importantly, the same ordering: the day's orders are imported before
+anything is pushed. `wix-inventory` is **retired** and answers
   410 — the tracker is the source of truth for stock, Wix inventory
   tracking is off for almost the whole catalogue, and
   `check_stock_item_update` refused its writes anyway.

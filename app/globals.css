@@ -705,3 +705,16 @@ th.num, td.num { text-align: right; }
 
 /* Card header with more than one action. */
 .head-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+/* Result of a "Push to Wix now". Persistent rather than a timed flash:
+   it reports a change to the public shop, which is worth reading. */
+.push-summary {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;
+  margin: 0 0 1rem; padding: 10px 14px;
+  background: var(--accent-soft); border: 1px solid var(--accent);
+  border-radius: var(--radius); font-size: 0.9rem; color: var(--ink);
+}
+.push-summary button {
+  background: none; border: none; cursor: pointer; padding: 0 2px;
+  font-size: 1.1rem; line-height: 1; color: var(--ink-soft);
+}

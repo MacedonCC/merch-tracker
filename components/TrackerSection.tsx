@@ -409,6 +409,9 @@ export default function TrackerSection({
   const [listedAt, setListedAt] = useState<Map<string, string | null>>(new Map());
   const [showNoHistory, setShowNoHistory] = useState(false);
   const [pushing, setPushing] = useState(false);
+  // Persistent, unlike flash(): a push result must not vanish after
+  // four seconds while the person is still reading it.
+  const [pushSummary, setPushSummary] = useState<string | null>(null);
 
   async function load() {
     // wix_listed_at lives on stock_items, not on the stock_overview
@@ -527,35 +530,52 @@ export default function TrackerSection({
     load();
   }
 
-  // Sets Wix inventory from the tracker's `available`, taking spoken-for
-  // sizes off sale. Reports first, then asks: this changes the public
-  // shop, so it should not happen on a single stray tap. Writing is
-  // refused server-side unless WIX_PUSH_ENABLED is set, and the report
-  // says so plainly rather than looking like it worked.
+  // Sets Wix inventory from the tracker's `available`, taking
+  // spoken-for sizes off sale. Reports first, then asks: this changes
+  // the public shop, so it should not happen on a single stray tap.
+  //
+  // EVERY outcome ends in a visible message, including cancelling and
+  // including a push that changed nothing. The first version returned
+  // silently when the confirm was dismissed, which made 'I cancelled'
+  // and 'it did nothing' look identical, and left no way to tell which
+  // had happened.
   async function pushToWix() {
     setPushing(true);
+    setPushSummary(null);
     try {
       const preview = await fetch('/api/wix-push').then((r) => r.json());
       if (!preview.ok) {
-        flash(preview.reason ?? preview.error ?? 'Could not reach Wix.');
+        setPushSummary(preview.reason ?? preview.error ?? 'Could not reach Wix.');
         return;
       }
-      const { wouldBlock, wouldStayOnSale, linesConsidered, skipped } = preview.counts;
+      const c = preview.counts;
       const summary =
-        `Set ${linesConsidered} sizes in Wix?\n\n` +
-        `${wouldStayOnSale} stay on sale\n` +
-        `${wouldBlock} go to zero (blocked online)\n` +
-        (skipped ? `${skipped} skipped — no Wix link\n` : '') +
+        `Set ${c.linesConsidered} sizes in Wix?\n\n` +
+        `${c.wouldStayOnSale} stay on sale\n` +
+        `${c.wouldBlock} go to zero (blocked online)\n` +
+        `${c.wouldChange} would actually change\n` +
+        (c.skipped ? `${c.skipped} skipped — no Wix link\n` : '') +
         (preview.pushEnabled
           ? ''
           : '\nWIX_PUSH_ENABLED is off, so nothing will be sent.');
-      if (!window.confirm(summary)) return;
+      if (!window.confirm(summary)) {
+        setPushSummary('Push cancelled — nothing was sent to Wix.');
+        return;
+      }
 
       const result = await fetch('/api/wix-push', { method: 'POST' }).then((r) => r.json());
-      flash(result.reason ?? (result.wrote ? 'Pushed to Wix.' : 'Nothing was sent.'));
+      const rc = result.counts;
+      setPushSummary(
+        result.error
+          ? `Push failed: ${result.error}`
+          : !result.wrote
+            ? result.reason
+            : `${result.reason} ${rc.wouldBlock} blocked, ${rc.newlyTracked} newly tracked` +
+              (rc.failed ? `, ${rc.failed} FAILED.` : '.')
+      );
       load();
     } catch {
-      flash('Could not reach Wix.');
+      setPushSummary('Could not reach Wix.');
     } finally {
       setPushing(false);
     }
@@ -866,6 +886,13 @@ export default function TrackerSection({
               </div>
             )}
           </div>
+
+          {pushSummary && (
+            <div className="push-summary" role="status">
+              <span>{pushSummary}</span>
+              <button aria-label="Dismiss" onClick={() => setPushSummary(null)}>×</button>
+            </div>
+          )}
           <div className="filters">
             <input placeholder="Search items" value={search} onChange={(e) => setSearch(e.target.value)} />
             <select value={cat} onChange={(e) => setCat(e.target.value)}>

@@ -163,8 +163,17 @@ Do this after the basics are working.
    product ID. Items without an ID won't sync — the tracker will tell you which
    ones it couldn't match.
 
-The sync runs every hour automatically. It only imports paid orders, and it will
-never create the same order twice, so re-running it is always safe.
+The sync runs **once a day, at 09:00 UTC** — that is 7pm at the club during
+AEST, and 8pm during daylight saving, because Vercel schedules crons in UTC
+rather than local time. It only imports paid orders, and it will never create
+the same order twice, so re-running it is always safe.
+
+Straight after importing, the same run pushes each size's availability back to
+Wix, so a garment that is sold out or already spoken for cannot be bought
+online. That push only happens when `WIX_PUSH_ENABLED` is set to `true`; leave
+it unset and the sync behaves exactly as it always did. Admins can also push on
+demand with **Push to Wix now** on the Stock page, which shows what it will
+change and asks before sending. Every push is recorded in `wix_stock_pushes`.
 
 ---
 
