@@ -204,9 +204,10 @@ actually uses:
   `low_stock_alert` or stock is oversold, topping back up to `target_level`.
   Items with `target_level = 0` never suggest an order.
   **The `/restock` page no longer reads this field.** It projects demand
-  from sales in the same season window last year (1 Aug – 28 Feb,
-  midnight pinned to Australia/Melbourne regardless of device timezone,
-  half-open so 28 Feb isn't dropped) and suggests
+  from sales in the most recently **completed** Aug–Feb season (never
+  one still running, which would under-project every line), with
+  midnight pinned to Australia/Melbourne regardless of device timezone
+  and a half-open upper bound so 28 Feb isn't dropped. It suggests
   `max(0, demand − available)`. `target_level` and this column both stay
   in place for the Stock page; restock simply stopped using them.
   Two traps in that formula: `shortfall` equals `−available` whenever
@@ -228,6 +229,11 @@ actually uses:
   would put an end of the window an hour out. Which season it is gets
   judged on the club's clock too — a device set to UTC is still 31 July
   when it is already August at the ground.
+  Which season counts as "completed" depends on the month: Jan–Feb
+  reaches back an extra year because the season that began last August
+  is still running, while Mar–Jul and Aug–Dec both land on the season
+  that began last August. Mar–Jul is the easy one to get wrong — it is
+  the tail of the calendar year but the season has already finished.
 - `stock_status` — `ok | low | out | oversold`.
 
 Stock quantity itself only changes via two triggers on `orders`, and

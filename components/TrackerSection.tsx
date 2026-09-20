@@ -177,19 +177,33 @@ function clubMidnight(year: number, monthIndex: number, day: number): Date {
   return new Date(second);
 }
 
+// Always the most recently COMPLETED Aug-Feb season, never one still
+// running — a half-finished season would under-project every line,
+// badly in September and catastrophically in August.
+//
+// Which year that season started depends on where we are in the club's
+// calendar, judged on the club's clock rather than the device's:
+//
+//   Jan, Feb   the season that began last August is still running, so
+//              the last completed one began the August before that
+//   Mar - Jul  the season that began last August finished in February,
+//              so it is the most recent completed one
+//   Aug - Dec  a new season has begun and is running, so the most
+//              recent completed one began last August
+//
+// Mar-Jul and Aug-Dec therefore land on the same answer, and only
+// Jan-Feb reaches back an extra year. Getting this wrong is quiet: the
+// page still renders a plausible list, just built from the wrong year.
 function lastSeasonWindow(now = new Date()): { start: Date; end: Date; label: string } {
-  // Which season we are in is judged by the club's calendar, not the
-  // device's. Aug-Dec belongs to the season named for this year;
-  // Jan-Jul is the tail of the season that started last year.
   const clubNow = new Date(now.getTime() + clubOffsetMs(now.getTime()));
   const clubYear = clubNow.getUTCFullYear();
   const clubMonth = clubNow.getUTCMonth();
-  const seasonStartYear = clubMonth >= 7 ? clubYear : clubYear - 1;
+  const seasonStartYear = clubMonth <= 1 ? clubYear - 2 : clubYear - 1;
 
   return {
-    start: clubMidnight(seasonStartYear - 1, 7, 1),
-    end: clubMidnight(seasonStartYear, 2, 1),
-    label: `1 Aug ${seasonStartYear - 1} – 28 Feb ${seasonStartYear}`,
+    start: clubMidnight(seasonStartYear, 7, 1),
+    end: clubMidnight(seasonStartYear + 1, 2, 1),
+    label: `1 Aug ${seasonStartYear} – 28 Feb ${seasonStartYear + 1}`,
   };
 }
 
