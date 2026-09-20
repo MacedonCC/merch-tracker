@@ -210,6 +210,10 @@ export async function GET(req: NextRequest) {
             .filter((o) => /size/i.test(o.name ?? ''))
             .flatMap((o) => (o.choices ?? []).map((c) => c.value)) ?? [],
         variantsReturned: (p.variants ?? []).length,
+        variants: (p.variants ?? []).map((v) => ({
+          id: v.id,
+          choices: v.choices ?? {},
+        })),
       })),
     });
   }
@@ -249,6 +253,21 @@ export async function GET(req: NextRequest) {
       byProduct.set(r.wix_product_id, r);
     }
   }
+
+  // Editing a product's size options in Wix REGENERATES its variant
+  // ids: the old ones cease to exist. A tracker row still holding a
+  // dead id can no longer be matched by id, and silently falls back to
+  // name matching - or, if the product was also renamed, to nothing at
+  // all, which is how a size ends up duplicated with its stock
+  // stranded on the old row. Every stored id is checked against every
+  // id Wix returned so this is visible rather than inferred.
+  const liveVariantIds = new Set<string>();
+  for (const p of products) {
+    for (const v of p.variants ?? []) if (v.id) liveVariantIds.add(v.id);
+  }
+  const staleVariantIds = rows
+    .filter((r) => r.wix_variant_id && !liveVariantIds.has(r.wix_variant_id))
+    .map((r) => `${r.name} / ${r.size}: ${r.wix_variant_id}`);
 
   // A row already linked to a DIFFERENT Wix product must not be stolen
   // by a name collision, and one row must not be claimed twice.
@@ -414,6 +433,7 @@ export async function GET(req: NextRequest) {
       skippedAsFees: skippedAsFees.length,
         duplicateWixSizes: duplicateWixSizes.length,
       conflicts: conflicts.length,
+      staleVariantIds: staleVariantIds.length,
       failed: failed.length,
     },
     toLink,
@@ -423,6 +443,7 @@ export async function GET(req: NextRequest) {
     ...(dryRun ? { wixDiagnostics } : {}),
     duplicateWixSizes,
     conflicts,
+    staleVariantIds,
     failed,
   });
 }
