@@ -684,3 +684,9 @@ tfoot td.num { white-space: nowrap; }
 
 /* Numeric columns align right so quantities compare down the column. */
 th.num, td.num { text-align: right; }
+
+/* Repeated column headings inside each product block. They inherit the
+   base th look; the hover rule is suppressed so they do not behave like
+   data rows, and the product name above them keeps its own divider. */
+.restock-colheads th { padding-top: 0.45rem; padding-bottom: 0.45rem; }
+.restock-colheads:hover, .restock-product:hover { background: none; }

@@ -879,19 +879,22 @@ export default function TrackerSection({
           ) : (
             <>
               <table>
-                <thead>
-                  <tr>
-                    <th>Size</th>
-                    <th className="num">Sold last season</th>
-                    <th className="num">Available</th>
-                    <th className="num">Owed</th>
-                    <th className="num">Order</th>
-                  </tr>
-                </thead>
+                {/* Headings repeat under every product rather than once
+                    at the top: the list is long enough that a single
+                    header scrolls away, and "Sold last season" vs
+                    "Available" vs "Order" are three similar-looking
+                    numbers to be guessing at from memory. */}
                 {restockGroups.map((g) => (
                   <tbody key={g.name}>
                     <tr className="restock-product">
                       <th colSpan={5} scope="colgroup">{g.name}</th>
+                    </tr>
+                    <tr className="restock-colheads">
+                      <th scope="col">Size</th>
+                      <th scope="col" className="num">Sold last season</th>
+                      <th scope="col" className="num">Available</th>
+                      <th scope="col" className="num">Owed</th>
+                      <th scope="col" className="num">Order</th>
                     </tr>
                     {g.lines.map((l) => (
                       <tr key={l.id}>
