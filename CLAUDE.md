@@ -184,10 +184,19 @@ Two different auth patterns are used depending on who calls the route:
   check the signed-in user via `requireAdmin()` (`lib/member.ts`), using the
   cookie-bound client, before doing anything with the service-role client.
 - **Cron/webhook-style routes** (`app/api/wix-sync`, `wix-import`,
-  `wix-inventory`): check a bearer token against `CRON_SECRET`, since there's
-  no signed-in user. These are also excluded from the auth middleware
-  matcher in `middleware.ts` (`wix-sync` explicitly; the others are hit only
-  by Vercel cron/manual calls with the secret).
+  `wix-inventory`, `wix-media`): check a bearer token against
+  `CRON_SECRET`, since there's no signed-in user.
+
+**`middleware.ts` excludes all of `api/` from the matcher, and must keep
+doing so.** Middleware redirects an unauthenticated request to `/login`,
+which is meaningless for an API caller and — crucially — happens
+*before* the route runs, so a `CRON_SECRET` bearer token never gets
+looked at. Only `api/wix-sync` was excluded originally, so `wix-import`,
+`wix-inventory` and `wix-media` answered `307 -> /login` to every
+external call and were unreachable; `wix-sync` was excluded, which is
+the only reason the daily cron kept working. This is safe precisely
+because of the rule above: every API route authenticates itself, so
+middleware was never their security boundary.
 
 ### Stock model — `stock_overview` is the source of truth for quantities
 

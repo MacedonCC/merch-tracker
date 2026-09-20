@@ -59,8 +59,27 @@ export async function middleware(request: NextRequest) {
   return response;
 }
 
-// Excludes public static assets (images, icons, fonts) as well as the
-// Next.js internals and the Wix cron route. This isn't just tidiness:
+// Excludes public static assets (images, icons, fonts), the Next.js
+// internals, and EVERY /api route.
+//
+// The api/ exclusion is the important one. This middleware redirects an
+// unauthenticated request to /login, which is the right answer for a
+// page and useless for an API: the caller wanted JSON and gets a 307 to
+// an HTML login form. Worse, it happens BEFORE the route runs, so a
+// route that authenticates with CRON_SECRET never gets the chance - the
+// bearer token is irrelevant because middleware does not look at it.
+// Only api/wix-sync was excluded here, so wix-import, wix-media and
+// wix-inventory all answered 307 -> /login to any external call and
+// were effectively unreachable. wix-sync was fine, which is why the
+// daily cron kept working.
+//
+// Excluding all of api/ is safe because every route already
+// authenticates itself, which is the rule in CLAUDE.md: the five
+// members/invitations routes call requireAdmin(), send-payment-link
+// calls getCurrentMember(), and the four wix-* routes check
+// CRON_SECRET. Middleware was never their security boundary, so
+// removing it takes nothing away - it just lets each route answer with
+// its own status instead of a redirect. This isn't just tidiness:
 // the club logo on the login page renders via next/image, and Vercel's
 // Image Optimization fetches a "local" /public asset like /mcc-logo.jpg
 // with an HTTP request back to this same deployment — a request that,
@@ -71,5 +90,5 @@ export async function middleware(request: NextRequest) {
 // only ever visible on /login itself, since that's the one page an
 // unauthenticated visitor (and so an uncookied asset fetch) ever loads.
 export const config = {
-  matcher: ['/((?!_next/static|_next/image|favicon.ico|api/wix-sync|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)'],
+  matcher: ['/((?!_next/static|_next/image|favicon.ico|api/|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)'],
 };
