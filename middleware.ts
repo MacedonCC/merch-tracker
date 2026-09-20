@@ -33,20 +33,28 @@ export async function middleware(request: NextRequest) {
 
   const { data: { user } } = await supabase.auth.getUser();
 
+  // getUser() above refreshes an expired access token, and Supabase
+  // ROTATES refresh tokens: the old one is revoked the instant it is
+  // used. When that happens, setAll() has written the new auth cookies
+  // onto `response` and nowhere else. A redirect built with a bare
+  // NextResponse.redirect() therefore throws the new tokens away while
+  // the old ones are already dead, so the browser is left holding a
+  // revoked token and gets signed out on its very next request — the
+  // user sees "logged out again" and goes hunting for a magic link.
+  // Every redirect out of this middleware must carry those cookies.
+  function redirectTo(pathname: string) {
+    const url = request.nextUrl.clone();
+    url.pathname = pathname;
+    const redirect = NextResponse.redirect(url);
+    response.cookies.getAll().forEach((cookie) => redirect.cookies.set(cookie));
+    return redirect;
+  }
+
   const path = request.nextUrl.pathname;
   const isPublic = path.startsWith('/login') || path.startsWith('/auth');
 
-  if (!user && !isPublic) {
-    const url = request.nextUrl.clone();
-    url.pathname = '/login';
-    return NextResponse.redirect(url);
-  }
-
-  if (user && path.startsWith('/login')) {
-    const url = request.nextUrl.clone();
-    url.pathname = '/';
-    return NextResponse.redirect(url);
-  }
+  if (!user && !isPublic) return redirectTo('/login');
+  if (user && path.startsWith('/login')) return redirectTo('/');
 
   return response;
 }
