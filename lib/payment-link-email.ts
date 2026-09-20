@@ -6,15 +6,28 @@ import { money } from '@/lib/types';
 //
 // Email clients are not browsers. Everything here is deliberately old
 // fashioned: nested tables rather than flex or grid, every style inline
-// rather than in a <style> block (Gmail strips <head>), an HTML width
-// attribute alongside the CSS one on the logo (Outlook ignores CSS
-// width on images), and a bulletproof button — a padded <td bgcolor>
-// wrapping the anchor — because Outlook drops padding on an <a> and
-// would otherwise render a bare text link.
+// rather than in a <style> block (Gmail strips <head>), and an HTML
+// width attribute alongside the CSS one on the logo, since Outlook
+// ignores CSS width on images.
 //
-// Colours are stated explicitly on both the container and the text so a
-// client running in dark mode cannot invert the card into unreadable
-// dark-red-on-black.
+// THE BUTTON is drawn twice. Outlook (the Word rendering engine) drops
+// padding on both <a> and <td>, which collapsed the first version into
+// a thin pink strip. The fix is the VML route: a <v:roundrect> inside
+// an `[if mso]` conditional that only Outlook sees, and an ordinary
+// anchor inside `[if !mso]` that everything else sees. Neither uses
+// vertical padding — both set an explicit height with a matching
+// line-height, which is the one approach Word honours. The VML needs
+// the v: and w: namespaces declared on <html>, and a fixed pixel width,
+// so it is sized to the content column (600 card - 2x32 padding = 536).
+// The non-Outlook anchor is display:block at width 100%, so it fills
+// the column on a phone instead of shrinking to fit its text.
+//
+// THE HEADER BAND is a full-width white row rather than a logo dropped
+// into the card. The logo is a JPEG with a baked-in white background,
+// and a client running in dark mode inverts the card while leaving the
+// image alone — which is what made it look like a white square pasted
+// onto a dark panel. Spanning the band across the whole card means that
+// wherever the inversion lands, it reads as a deliberate masthead.
 //
 // NOTE ON WORDING: this must not promise the item is reserved. A
 // payment-link sale is recorded as `pending`, and stock_overview counts
@@ -33,6 +46,12 @@ const INK = '#111827';
 const MUTED = '#6b7280';
 const LINE = '#e5e7eb';
 const PAGE = '#f4f5f7';
+
+/** Card width, and the content column inside its 32px side padding. */
+const CARD_WIDTH = 600;
+const CONTENT_WIDTH = CARD_WIDTH - 32 * 2;
+/** Button height, reused as line-height so Outlook centres the label. */
+const BUTTON_HEIGHT = 54;
 
 export interface PaymentLinkEmailInput {
   customerName: string;
@@ -103,6 +122,7 @@ export function paymentLinkHtml(input: PaymentLinkEmailInput): string {
   const product = escapeHtml(input.productName);
   const size = escapeHtml(input.size);
   const url = escapeHtml(input.paymentUrl);
+  const buttonLabel = `Pay ${total} online`;
 
   const detailRow = (label: string, value: string) => `
               <tr>
@@ -110,22 +130,20 @@ export function paymentLinkHtml(input: PaymentLinkEmailInput): string {
                 <td style="padding:6px 0;font-size:14px;color:${INK};font-weight:600;" valign="top">${value}</td>
               </tr>`;
 
-  const logoBlock = input.hasLogo
-    ? `
-            <tr>
-              <td align="center" style="padding:0 0 12px 0;">
-                <img src="cid:${LOGO_CID}" alt="Macedon Cricket Club" width="110" height="112"
-                     style="display:block;border:0;outline:none;width:110px;height:112px;" />
-              </td>
-            </tr>`
+  const logoImg = input.hasLogo
+    ? `<img src="cid:${LOGO_CID}" alt="Macedon Cricket Club" width="104" height="106"
+                       style="display:block;border:0;outline:none;width:104px;height:106px;margin:0 auto 10px auto;" />`
     : '';
 
   return `<!DOCTYPE html>
-<html lang="en">
+<html lang="en" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <title>Your Macedon Cricket Club order</title>
+<!--[if mso]>
+<xml><o:OfficeDocumentSettings><o:PixelsPerInch>96</o:PixelsPerInch></o:OfficeDocumentSettings></xml>
+<![endif]-->
 </head>
 <body style="margin:0;padding:0;background-color:${PAGE};">
   <div style="display:none;max-height:0;overflow:hidden;opacity:0;">
@@ -137,25 +155,28 @@ export function paymentLinkHtml(input: PaymentLinkEmailInput): string {
     <tr>
       <td align="center" style="padding:24px 12px;">
 
-        <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0"
-               style="width:600px;max-width:600px;background-color:#ffffff;border-radius:8px;">
-          <tr>
-            <td style="padding:28px 32px 32px 32px;font-family:Arial,Helvetica,sans-serif;">
+        <table role="presentation" width="${CARD_WIDTH}" cellpadding="0" cellspacing="0" border="0"
+               style="width:${CARD_WIDTH}px;max-width:${CARD_WIDTH}px;background-color:#ffffff;border-radius:8px;">
 
-              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
-                ${logoBlock}
-                <tr>
-                  <td align="center" style="padding:0 0 10px 0;font-family:Arial,Helvetica,sans-serif;
-                      font-size:13px;letter-spacing:1.5px;text-transform:uppercase;color:${MUTED};">
-                    Macedon Cricket Club
-                  </td>
-                </tr>
-                <tr>
-                  <td style="padding:0 0 22px 0;">
-                    <div style="height:3px;background-color:${RED};line-height:3px;font-size:0;">&nbsp;</div>
-                  </td>
-                </tr>
-              </table>
+          <tr>
+            <td align="center" bgcolor="#ffffff"
+                style="background-color:#ffffff;padding:26px 24px 18px 24px;border-radius:8px 8px 0 0;
+                       font-family:Arial,Helvetica,sans-serif;">
+              ${logoImg}
+              <div style="font-family:Arial,Helvetica,sans-serif;font-size:19px;font-weight:bold;
+                          letter-spacing:4px;text-transform:uppercase;color:${INK};line-height:26px;">
+                Macedon&nbsp;Cricket&nbsp;Club
+              </div>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:0;">
+              <div style="height:3px;background-color:${RED};line-height:3px;font-size:0;">&nbsp;</div>
+            </td>
+          </tr>
+
+          <tr>
+            <td style="padding:26px 32px 32px 32px;font-family:Arial,Helvetica,sans-serif;">
 
               <p style="margin:0 0 14px 0;font-family:Arial,Helvetica,sans-serif;font-size:22px;
                  font-weight:bold;color:${INK};">Thanks, ${name}</p>
@@ -185,14 +206,27 @@ ${detailRow('Qty', String(input.quantity))}
                 </tr>
               </table>
 
-              <table role="presentation" cellpadding="0" cellspacing="0" border="0" align="center"
-                     style="margin:26px auto 22px auto;">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
+                     style="margin:26px 0 22px 0;">
                 <tr>
-                  <td align="center" bgcolor="${RED}" style="border-radius:6px;">
+                  <td align="center" style="font-family:Arial,Helvetica,sans-serif;">
+<!--[if mso]>
+<v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word"
+   href="${url}" style="height:${BUTTON_HEIGHT}px;v-text-anchor:middle;width:${CONTENT_WIDTH}px;"
+   arcsize="11%" stroke="f" fillcolor="${RED}">
+  <w:anchorlock/>
+  <center style="color:#ffffff;font-family:Arial,Helvetica,sans-serif;font-size:17px;font-weight:bold;">
+    ${buttonLabel}
+  </center>
+</v:roundrect>
+<![endif]-->
+<!--[if !mso]><!-- -->
                     <a href="${url}"
-                       style="display:inline-block;padding:17px 34px;font-family:Arial,Helvetica,sans-serif;
-                              font-size:16px;font-weight:bold;color:#ffffff;text-decoration:none;
-                              border-radius:6px;">Pay ${total} online &rarr;</a>
+                       style="display:block;width:100%;height:${BUTTON_HEIGHT}px;line-height:${BUTTON_HEIGHT}px;
+                              background-color:${RED};color:#ffffff;font-family:Arial,Helvetica,sans-serif;
+                              font-size:17px;font-weight:bold;text-align:center;text-decoration:none;
+                              border-radius:6px;mso-hide:all;">${buttonLabel} &rarr;</a>
+<!--<![endif]-->
                   </td>
                 </tr>
               </table>
