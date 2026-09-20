@@ -165,7 +165,7 @@ input, select, textarea {
 }
 input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 
-.filters { display: flex; gap: 8px; padding: 0.75rem 1.15rem; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.filters { display: flex; align-items: center; gap: 8px; padding: 0.75rem 1.15rem; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
 .filters input { max-width: 240px; }
 .filters select { max-width: 160px; }
 
@@ -383,17 +383,12 @@ button.matrix-line:hover { background-color: var(--tint); }
 /* Under a status filter, everything outside that state recedes. */
 .is-dimmed { opacity: 0.3; }
 
-/* The legend lives in the card header, under the action buttons, so
-   the key is visible before you start reading the grid rather than
-   after scrolling past it. */
-.head-right { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
-/* Scoped with :has() so only the card carrying a stacked right-hand
-   column changes: everywhere else the header stays vertically centred,
-   which is right when both sides are a single row. */
-.card-head:has(.head-right) { align-items: flex-start; }
-.card-head:has(.head-right) h2 { min-height: 30px; align-items: center; }
+/* The legend shares the filters row, pushed to the right by margin-left
+   auto rather than justify-content, so it is the only thing that moves:
+   the search box and dropdowns keep their natural left-hand order. */
 .matrix-legend {
-  display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px;
+  display: flex; flex-wrap: wrap; gap: 6px;
+  margin-left: auto;
   font-size: 0.72rem; color: var(--ink-faint);
 }
 /* Every key is a chip, including "Not offered" - a bare dash sitting
@@ -408,9 +403,11 @@ button.matrix-line:hover { background-color: var(--tint); }
   box-shadow: inset 0 0 0 1px var(--line-strong);
 }
 
-@media (max-width: 640px) {
-  .head-right { align-items: stretch; width: 100%; }
-  .matrix-legend { justify-content: flex-start; }
+/* On a phone the legend takes a row of its own under the filters:
+   margin-left auto would otherwise strand five chips against the right
+   edge under a full-width search box. */
+@media (max-width: 720px) {
+  .matrix-legend { margin-left: 0; width: 100%; }
 }
 
 @media (max-width: 640px) {

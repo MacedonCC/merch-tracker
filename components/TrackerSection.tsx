@@ -921,7 +921,9 @@ export default function TrackerSection({
         </div>
         <div className="metric">
           <span>Short</span>
-          <strong style={{ color: totalShort ? 'var(--alert)' : undefined }}>{totalShort}</strong>
+          {/* Same purple as Short in the grid, so the summary and the
+              cells agree. Only when non-zero: a zero is not a warning. */}
+          <strong style={{ color: totalShort ? 'var(--stock-oversold)' : undefined }}>{totalShort}</strong>
           <small>owed with nothing to give</small>
         </div>
         <div className="metric">
@@ -935,27 +937,14 @@ export default function TrackerSection({
         <div className="card">
           <div className="card-head">
             <h2>Inventory</h2>
-            {/* Buttons and legend share a right-hand column so the
-                legend sits directly under the actions. It stays outside
-                the isAdmin guard: a helper cannot add items but still
-                needs to read the grid. */}
-            <div className="head-right">
-              {isAdmin && (
-                <div className="head-actions">
-                  <button className="btn-mini" disabled={pushing} onClick={pushToWix}>
-                    {pushing ? 'Pushing…' : 'Push to Wix now'}
-                  </button>
-                  <button className="btn-solid" onClick={() => setModal('item')}>Add item</button>
-                </div>
-              )}
-            <div className="matrix-legend" aria-hidden="true">
-              <span className="matrix-key matrix-ok">In stock</span>
-              <span className="matrix-key matrix-low">Low</span>
-              <span className="matrix-key matrix-out">None left</span>
-              <span className="matrix-key matrix-oversold">Short</span>
-              <span className="matrix-key matrix-notoffered">Not offered</span>
-            </div>
-            </div>
+            {isAdmin && (
+              <div className="head-actions">
+                <button className="btn-mini" disabled={pushing} onClick={pushToWix}>
+                  {pushing ? 'Pushing…' : 'Push to Wix now'}
+                </button>
+                <button className="btn-solid" onClick={() => setModal('item')}>Add item</button>
+              </div>
+            )}
           </div>
 
           {pushSummary && (
@@ -977,6 +966,18 @@ export default function TrackerSection({
               <option value="out">None left</option>
               <option value="oversold">Short</option>
             </select>
+            {/* Sits with the filters rather than the header buttons: the
+                key belongs next to the controls that change what the
+                grid shows, and it is read while scanning, not before.
+                aria-hidden because it restates colour the table already
+                conveys in text. */}
+            <div className="matrix-legend" aria-hidden="true">
+              <span className="matrix-key matrix-ok">In stock</span>
+              <span className="matrix-key matrix-low">Low</span>
+              <span className="matrix-key matrix-out">None left</span>
+              <span className="matrix-key matrix-oversold">Short</span>
+              <span className="matrix-key matrix-notoffered">Not offered</span>
+            </div>
           </div>
           {visibleGroups.length === 0 ? (
             <div className="empty">Nothing matches those filters.</div>
