@@ -137,19 +137,58 @@ const money = (n: number) =>
 //
 // Bounds are half-open. An inclusive `<= 28 Feb` would resolve to
 // midnight at the START of the 28th and silently drop that whole day.
-// Dates are built with the Date constructor rather than parsed from a
-// string, so the window is local midnight in the viewer's timezone
-// rather than UTC — a 9am Melbourne order on 1 Aug is 23:00 UTC on 31
-// July, and a UTC window would miss it.
+//
+// The window is pinned to Australia/Melbourne rather than the device's
+// timezone, so a committee member checking the list from overseas sees
+// the same season as everyone at the club. That matters at both ends:
+// the boundaries themselves, and which season we are in at all — a
+// laptop set to UTC on 1 August is still 31 July there while it is
+// already August at the ground.
+//
+// The zone's offset is read from Intl rather than hardcoded, because it
+// is not constant across the window: Melbourne is UTC+10 (AEST) on
+// 1 August but UTC+11 (AEDT) on 1 March, so a single fixed offset would
+// put one end of the window an hour out.
+const CLUB_TZ = 'Australia/Melbourne';
+
+// Milliseconds to add to a UTC instant to get the club's wall clock.
+function clubOffsetMs(utcMs: number): number {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: CLUB_TZ,
+    hour12: false,
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+  }).formatToParts(new Date(utcMs));
+  const at = (type: string) => Number(parts.find((p) => p.type === type)?.value ?? 0);
+  // Some engines report midnight as hour 24 under hour12: false.
+  const hour = at('hour') === 24 ? 0 : at('hour');
+  const asIfUtc = Date.UTC(at('year'), at('month') - 1, at('day'), hour, at('minute'), at('second'));
+  return asIfUtc - utcMs;
+}
+
+// The instant at which the club's wall clock reads this local midnight.
+function clubMidnight(year: number, monthIndex: number, day: number): Date {
+  const naive = Date.UTC(year, monthIndex, day);
+  // Subtracting the offset at the naive instant lands very close; a
+  // second pass corrects the rare case where that first guess falls on
+  // the far side of a DST transition.
+  const first = naive - clubOffsetMs(naive);
+  const second = naive - clubOffsetMs(first);
+  return new Date(second);
+}
+
 function lastSeasonWindow(now = new Date()): { start: Date; end: Date; label: string } {
-  // Aug-Dec belongs to the season named for this year; Jan-Jul is the
-  // tail of the season that started last year.
-  const seasonStartYear = now.getMonth() >= 7 ? now.getFullYear() : now.getFullYear() - 1;
-  const start = new Date(seasonStartYear - 1, 7, 1);
-  const end = new Date(seasonStartYear, 2, 1);
+  // Which season we are in is judged by the club's calendar, not the
+  // device's. Aug-Dec belongs to the season named for this year;
+  // Jan-Jul is the tail of the season that started last year.
+  const clubNow = new Date(now.getTime() + clubOffsetMs(now.getTime()));
+  const clubYear = clubNow.getUTCFullYear();
+  const clubMonth = clubNow.getUTCMonth();
+  const seasonStartYear = clubMonth >= 7 ? clubYear : clubYear - 1;
+
   return {
-    start,
-    end,
+    start: clubMidnight(seasonStartYear - 1, 7, 1),
+    end: clubMidnight(seasonStartYear, 2, 1),
     label: `1 Aug ${seasonStartYear - 1} – 28 Feb ${seasonStartYear}`,
   };
 }

@@ -205,7 +205,8 @@ actually uses:
   Items with `target_level = 0` never suggest an order.
   **The `/restock` page no longer reads this field.** It projects demand
   from sales in the same season window last year (1 Aug – 28 Feb,
-  local midnight, half-open so 28 Feb isn't dropped) and suggests
+  midnight pinned to Australia/Melbourne regardless of device timezone,
+  half-open so 28 Feb isn't dropped) and suggests
   `max(0, demand − available)`. `target_level` and this column both stay
   in place for the Stock page; restock simply stopped using them.
   Two traps in that formula: `shortfall` equals `−available` whenever
@@ -222,6 +223,11 @@ actually uses:
   `stock_items.created_at` is identical on every row (the date this
   repo's migrations first ran), so it cannot tell you when a line became
   sellable and must not be used for this.
+  The window's offset is read from `Intl` per boundary, not hardcoded:
+  Melbourne is UTC+10 on 1 Aug but UTC+11 on 1 Mar, so one fixed offset
+  would put an end of the window an hour out. Which season it is gets
+  judged on the club's clock too — a device set to UTC is still 31 July
+  when it is already August at the ground.
 - `stock_status` — `ok | low | out | oversold`.
 
 Stock quantity itself only changes via two triggers on `orders`, and
