@@ -112,6 +112,21 @@ same pattern `is_admin()` uses. When adding a new permission-gated field,
 extend the relevant trigger — adding it only to the RLS policy won't give
 you column granularity.
 
+One deliberate hole in `check_stock_item_update()`, added in
+`supabase/migrations/20260920000003_handover_stock_permission.sql`:
+handing over an order deducts stock via `handle_distribution_change()`,
+whose inner `update stock_items` fires `check_stock_item_update()` and
+used to demand `can_adjust_stock`. `SECURITY DEFINER` does not help —
+it changes the role, but `auth.jwt()` still resolves to the signed-in
+member, so every helper (all of whom have `can_adjust_stock = false`)
+was blocked from handing anything over at all. The order triggers now
+set a transaction-local `app.order_stock_change` flag around their stock
+writes, and `check_stock_item_update()` returns early when it is set.
+`can_adjust_stock` still gates editing a count by hand; this only
+exempts the automatic consequence of a handover the member was already
+entitled to perform. The flag is cleared immediately after each write
+and cannot be set through PostgREST.
+
 ### Invitations — how a person actually gets committee access
 
 `invitations` (same migration as above) records an offer: email, role,
@@ -251,6 +266,42 @@ order can import as several rows (one per line item). Designed to do a
 constant number of Supabase calls regardless of import size — read existing
 keys, read stock list, one bulk upsert — with matching/deduping done in
 memory; keep that shape when touching it.
+
+### The quick-sale flow (`/sell`)
+
+`app/sell/page.tsx` + `components/SellFlow.tsx` — a single-screen,
+mobile-first flow for selling at the ground: product grid → size chips →
+customer (type-ahead over distinct `orders.customer_name`) → cash or
+payment link. Any committee member can use it; there is no extra
+permission gate.
+
+Two things about it are load-bearing:
+
+- **A cash sale is two writes, not one.** The order is INSERTed with
+  `distributed_at` null, then immediately UPDATEd to set it. That is not
+  redundant: stock only moves on UPDATE (see the trigger section above),
+  so inserting with `distributed_at` already set would hand the garment
+  over without ever reducing stock. This is the mirror image of the
+  `wix-sync` rule, which needs the opposite shape for the opposite
+  reason. Verified against the live database: after the INSERT the count
+  is unchanged, after the UPDATE it drops by one.
+- **A back-order is never handed over.** Sizes with `available <= 0` stay
+  sellable, but only the INSERT runs — no `distributed_at`, no stock
+  movement — because there is nothing in the cupboard to give. The
+  confirmation screen switches colour and spells out that the item is
+  owed, so a coach mid-queue cannot misread it as complete.
+
+`stock_items.image_url` / `wix_product_url` (migration
+`20260920000002_sell_flow.sql`) feed the product grid and the "send
+payment link" button, and are populated from the Wix catalogue by
+`app/api/wix-media/route.ts`, keyed on `wix_product_id`. Both are
+nullable: an unlinked item falls back to a lettered tile and offers no
+link. These are Wix shop product pages, **not** PlayHQ links — PlayHQ is
+registration, not merchandise.
+
+`orders.payment_method` is `cash | online | unknown`. Historical rows
+default to `unknown`; every Wix row is `online` (backfilled, and set on
+import).
 
 ### Route structure
 

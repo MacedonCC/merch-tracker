@@ -446,3 +446,185 @@ button.matrix-line:hover { background-color: var(--tint); }
 .footer-logo { width: 20px; height: 20px; flex-shrink: 0; color: var(--accent); }
 .footer-inner strong { font-weight: 600; color: var(--ink-soft); }
 .footer-powered { color: var(--accent); opacity: 0.75; }
+
+/* ---------------- /sell: one-handed quick sale at the ground ----------------
+   Sized for a phone held in one hand, outdoors, in a hurry. Every control
+   is at least 56px tall (above the 44px minimum) because the target is a
+   thumb, not a cursor. Single column throughout, so nothing scrolls
+   sideways and nothing needs a second hand to reach. */
+
+.sell { max-width: 560px; margin: 0 auto; }
+.sell section { display: flex; flex-direction: column; gap: 12px; }
+
+.sell-steps {
+  display: flex; gap: 6px; list-style: none;
+  margin-bottom: 1.25rem;
+}
+.sell-steps li {
+  flex: 1 1 0; text-align: center; font-size: 0.75rem; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.06em;
+  padding: 7px 4px; border-radius: 999px;
+  background: var(--paper); color: var(--ink-faint);
+  border: 1px solid var(--line);
+}
+.sell-steps li[data-state='now'] {
+  background: var(--accent); border-color: var(--accent); color: #fff;
+}
+.sell-steps li[data-state='done'] { color: var(--ink-soft); border-color: var(--line-strong); }
+
+.sell-h { font-size: 1.5rem; font-weight: 700; letter-spacing: -0.01em; }
+.sell-sub { color: var(--ink-soft); font-size: 1rem; margin-top: -4px; }
+.sell-note { color: var(--ink-faint); font-size: 0.9rem; }
+
+.sell-error, .sell-warn {
+  padding: 12px 14px; border-radius: var(--radius); font-size: 0.95rem;
+  background: var(--alert-soft); color: var(--ink);
+  border: 1px solid var(--alert);
+}
+.sell-warn { background: var(--warn-soft); border-color: var(--warn); }
+
+/* Step 1 — product grid. Two columns on the narrowest phone; the cards
+   stay large because the image box is a fixed aspect rather than fluid. */
+.sell-grid {
+  display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px;
+}
+@media (min-width: 520px) {
+  .sell-grid { grid-template-columns: repeat(3, 1fr); }
+}
+.sell-card {
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  padding: 14px 10px; min-height: 148px;
+  background: var(--paper); color: var(--ink);
+  border: 1px solid var(--line); border-radius: var(--radius);
+  font: inherit; text-align: center; cursor: pointer;
+  box-shadow: var(--shine-shadow);
+}
+.sell-card:active { transform: translateY(1px); border-color: var(--accent); }
+.sell-card-img {
+  width: 100%; aspect-ratio: 1 / 1; object-fit: contain;
+  border-radius: 6px; background: var(--wash);
+}
+.sell-card-fallback {
+  width: 100%; aspect-ratio: 1 / 1; display: grid; place-items: center;
+  font-size: 2.5rem; font-weight: 700; color: var(--ink-faint);
+  background: var(--wash); border-radius: 6px;
+}
+.sell-card-name { font-size: 0.95rem; font-weight: 600; line-height: 1.25; }
+.sell-card-meta { font-size: 0.8rem; color: var(--ink-faint); }
+
+/* Step 2 — size chips. Wrapping row so a product with many sizes still
+   fits without horizontal scroll. */
+.sell-chips { display: flex; flex-wrap: wrap; gap: 10px; }
+.sell-chip {
+  flex: 1 1 88px; min-height: 64px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 2px; padding: 8px 10px;
+  background: var(--paper); color: var(--ink);
+  border: 1px solid var(--line-strong); border-radius: var(--radius);
+  font: inherit; cursor: pointer;
+  box-shadow: var(--shine-shadow);
+}
+.sell-chip:active { transform: translateY(1px); border-color: var(--accent); }
+.sell-chip-size { font-size: 1.15rem; font-weight: 700; }
+.sell-chip-count { font-size: 0.75rem; color: var(--ink-faint); }
+/* Out-of-stock reads as unavailable but stays tappable: it is a
+   back-order, not a dead end. aria-disabled is deliberately NOT set. */
+.sell-chip[data-out='true'] {
+  background: var(--wash); border-style: dashed;
+  border-color: var(--line); color: var(--ink-faint);
+  box-shadow: none;
+}
+.sell-chip[data-out='true'] .sell-chip-count { color: var(--warn); }
+
+/* Step 3 — who */
+.sell-input {
+  width: 100%; min-height: 56px; padding: 0 14px;
+  font-size: 1.1rem; font-family: inherit;
+  background: var(--paper); color: var(--ink);
+  border: 1px solid var(--line-strong); border-radius: var(--radius);
+}
+.sell-input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+.sell-suggest { display: flex; flex-direction: column; gap: 6px; }
+.sell-suggest-item {
+  min-height: 52px; padding: 0 14px; text-align: left;
+  font: inherit; font-size: 1.05rem; cursor: pointer;
+  background: var(--row-alt); color: var(--ink);
+  border: 1px solid var(--line); border-radius: var(--radius);
+}
+.sell-suggest-item:active { border-color: var(--accent); }
+
+/* Buttons. sell-big is the thumb-sized variant used for anything that
+   commits a sale. */
+.sell-primary, .sell-secondary {
+  min-height: 56px; padding: 0 18px; width: 100%;
+  font: inherit; font-size: 1.05rem; font-weight: 650; cursor: pointer;
+  border-radius: var(--radius); border: 1px solid transparent;
+  background-image: var(--sheen-on-accent);
+  background-color: var(--accent); color: #fff;
+  box-shadow: var(--shine-shadow-accent);
+}
+.sell-secondary {
+  background-color: var(--paper); color: var(--ink);
+  background-image: var(--sheen);
+  border-color: var(--line-strong);
+  box-shadow: var(--shine-shadow);
+}
+.sell-big { min-height: 68px; font-size: 1.2rem; }
+.sell-primary:disabled, .sell-secondary:disabled { opacity: 0.45; cursor: default; }
+.sell-ghost {
+  min-height: 48px; width: 100%; padding: 0 12px;
+  background: none; border: none; cursor: pointer;
+  font: inherit; font-size: 0.95rem; color: var(--ink-soft);
+  text-decoration: underline; text-underline-offset: 3px;
+}
+
+/* Confirmation. The owed state has to be unmistakable at a glance: a
+   coach glancing down mid-queue must not read a back-order as complete,
+   so it changes colour, keeps the badge in capitals, and spells out in
+   a sentence that the parent is leaving with nothing. */
+.sell-done {
+  padding: 20px 18px; border-radius: var(--radius);
+  background: var(--accent-soft); border: 2px solid var(--accent);
+  display: flex; flex-direction: column; gap: 8px; text-align: center;
+}
+.sell-done[data-owed='true'] {
+  background: var(--warn-soft); border-color: var(--warn);
+}
+.sell-done-badge {
+  align-self: center; padding: 6px 14px; border-radius: 999px;
+  font-size: 0.8rem; font-weight: 700; letter-spacing: 0.08em;
+  text-transform: uppercase;
+  background: var(--accent); color: #fff;
+}
+.sell-done[data-owed='true'] .sell-done-badge { background: var(--warn); color: #1a1200; }
+.sell-done-title { font-size: 1.45rem; font-weight: 700; line-height: 1.2; }
+.sell-done-who { font-size: 1.15rem; color: var(--ink); }
+.sell-done-detail { font-size: 1rem; color: var(--ink-soft); }
+.sell-done-warn {
+  margin-top: 4px; padding: 12px 14px; border-radius: var(--radius);
+  background: var(--paper); border: 1px solid var(--warn);
+  font-size: 0.95rem; text-align: left; color: var(--ink);
+}
+
+.sell-link { display: flex; flex-direction: column; gap: 10px; }
+.sell-link-url {
+  padding: 14px; border-radius: var(--radius); font-size: 1rem;
+  background: var(--paper); border: 1px solid var(--line-strong);
+  word-break: break-all; text-align: center;
+}
+
+/* Home page: the sell action sits above the tiles and spans them. */
+.sell-cta {
+  display: flex; align-items: center; justify-content: center; gap: 10px;
+  min-height: 72px; margin-bottom: 14px; padding: 0 20px;
+  font-size: 1.25rem; font-weight: 700; text-decoration: none;
+  border-radius: var(--radius); border: 1px solid transparent;
+  background-color: var(--brand-red); background-image: var(--sheen-on-accent);
+  color: #fff; box-shadow: var(--shine-shadow);
+}
+.sell-cta:active { transform: translateY(1px); }
+
+@media (max-width: 640px) {
+  .sell { max-width: none; }
+  .shell { padding: 1.25rem 1rem 3rem; }
+}

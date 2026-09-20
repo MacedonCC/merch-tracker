@@ -316,6 +316,9 @@ export async function GET(req: NextRequest) {
         quantity: line.quantity ?? 1,
         unit_price: Number(line.price?.amount ?? match.price ?? 0),
         payment_status: 'paid',
+        // Anything arriving from the Wix shop was paid online by
+        // definition; only the /sell flow records cash.
+        payment_method: 'online',
         source: 'wix',
         wix_order_id: order.id,
         ordered_at: order.createdDate ?? new Date().toISOString(),

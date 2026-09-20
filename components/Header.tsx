@@ -9,6 +9,7 @@ import { initials } from '@/lib/types';
 
 const NAV_ITEMS = [
   { label: 'Home', href: '/' },
+  { label: 'Sell', href: '/sell' },
   { label: 'Stock', href: '/stock' },
   { label: 'Restock', href: '/restock' },
   { label: 'Orders', href: '/orders' },

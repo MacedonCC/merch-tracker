@@ -94,7 +94,14 @@ export default function HomeTiles() {
   ];
 
   return (
-    <div className="tile-grid">
+    <>
+      {/* Primary action: most trips to this app at the ground are a sale,
+          so it sits above the tiles rather than inside the grid. */}
+      <Link href="/sell" className="sell-cta">
+        <span aria-hidden="true">🏏</span>
+        Sell an item
+      </Link>
+      <div className="tile-grid">
       {tiles.map((t) => (
         <Link key={t.href} href={t.href} className="tile">
           <span className="tile-category">{t.category}</span>
@@ -110,6 +117,7 @@ export default function HomeTiles() {
           </div>
         </Link>
       ))}
-    </div>
+      </div>
+    </>
   );
 }

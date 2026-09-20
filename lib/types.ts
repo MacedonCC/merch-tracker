@@ -1,5 +1,6 @@
 export type StockStatus = 'ok' | 'low' | 'out';
 export type PaymentStatus = 'pending' | 'paid' | 'refunded';
+export type PaymentMethod = 'cash' | 'online' | 'unknown';
 
 export interface StockItem {
   id: string;
@@ -11,6 +12,8 @@ export interface StockItem {
   low_stock_alert: number;
   wix_product_id: string | null;
   wix_variant_id: string | null;
+  image_url: string | null;
+  wix_product_url: string | null;
   updated_at: string;
 }
 
@@ -23,6 +26,7 @@ export interface Order {
   quantity: number;
   unit_price: number;
   payment_status: PaymentStatus;
+  payment_method: PaymentMethod;
   distributed_at: string | null;
   source: 'manual' | 'wix';
   wix_order_id: string | null;
@@ -35,6 +39,21 @@ export function stockStatus(item: Pick<StockItem, 'quantity' | 'low_stock_alert'
   if (item.quantity === 0) return 'out';
   if (item.quantity <= item.low_stock_alert) return 'low';
   return 'ok';
+}
+
+// Canonical size order, matching the vocabulary standardised in
+// migration 20260920000001 (juniors, then adult small to large, then
+// one-size items). sizeRank() falls back to the end of the list rather
+// than dropping anything unrecognised, so a new size still renders.
+export const SIZE_ORDER = [
+  'JNR8', 'JNR10', 'JNR12', 'JNR14', 'JNR16',
+  'XS', 'S', 'M', 'L', 'XL', '2XL', '3XL', '4XL',
+  'One size',
+];
+
+export function sizeRank(size: string): number {
+  const i = SIZE_ORDER.indexOf(size.trim());
+  return i === -1 ? SIZE_ORDER.length : i;
 }
 
 export function money(n: number): string {
