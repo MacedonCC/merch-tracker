@@ -157,10 +157,26 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1
 .filters input { max-width: 240px; }
 .filters select { max-width: 160px; }
 
-.chip-row { display: flex; gap: 8px; padding: 0.9rem 1.15rem; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+/* Six filters across the full width, equal columns rather than a
+   wrapping flex line: a grid keeps every button the same size and the
+   row the same shape at every width, instead of reflowing into a
+   different arrangement each time the label lengths change. Phones get
+   3 x 2, which fits the six without shrinking the tap targets. */
+.chip-row {
+  display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px;
+  padding: 0.9rem 1.15rem; border-bottom: 1px solid var(--line);
+}
+@media (max-width: 760px) {
+  .chip-row { grid-template-columns: repeat(3, 1fr); gap: 6px; padding: 0.75rem 0.9rem; }
+}
+/* Count above label: the number is what you scan for, and stacking
+   keeps "Waiting on stock" readable in a sixth of the width instead of
+   forcing it to ellipsis. */
 .chip {
-  display: inline-flex; align-items: center; gap: 6px;
-  padding: 6px 14px; border-radius: 999px; font-size: 0.82rem; font-weight: 500;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 2px; min-height: 58px; padding: 8px 6px; width: 100%;
+  border-radius: var(--radius); font-size: 0.78rem; font-weight: 500;
+  line-height: 1.2; text-align: center; cursor: pointer;
   border: 1px solid var(--line-strong);
   background-color: var(--wash); background-image: var(--sheen); color: var(--ink-soft);
 }
@@ -170,7 +186,11 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1
   border-color: var(--accent); color: #fff;
   box-shadow: var(--shine-shadow-accent);
 }
-.chip-count { font-size: 0.72rem; opacity: 0.85; }
+.chip-count { font-size: 1.15rem; font-weight: 700; line-height: 1.1; opacity: 1; }
+@media (max-width: 760px) {
+  .chip { min-height: 54px; font-size: 0.72rem; }
+  .chip-count { font-size: 1.05rem; }
+}
 
 /* ---------------- Orders: one column grid for every chip ----------------
    Name | Qty | Item | Ordered | (Status) | action | ⋯. Everything is

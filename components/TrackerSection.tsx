@@ -392,13 +392,18 @@ function classifyOrders(
 
 // Ordered so the two money-chasing states sit together on the left and
 // the two stock-handling states in the middle.
+// Ordered by what someone opening the page actually does: hand things
+// over first, chase stock, then chase money, with Done and All at the
+// end as lookups rather than work. Six of them, which is why the row is
+// a 6-up grid on desktop and 3 x 2 on a phone rather than a wrapping
+// flex line that reflows differently at every width.
 const CHIPS: { key: 'all' | OrderState; label: string }[] = [
-  { key: 'all', label: 'All' },
-  { key: 'unpaid', label: 'Unpaid' },
-  { key: 'owing', label: 'Has gear, unpaid' },
   { key: 'ready', label: 'Ready' },
   { key: 'waiting', label: 'Waiting on stock' },
+  { key: 'unpaid', label: 'Unpaid' },
+  { key: 'owing', label: 'Has gear, unpaid' },
   { key: 'done', label: 'Done' },
+  { key: 'all', label: 'All' },
 ];
 
 interface OrderGroup {
@@ -1156,7 +1161,8 @@ export default function TrackerSection({
                 data-active={orderChip === c.key}
                 onClick={() => setOrderChip(c.key)}
               >
-                {c.label} <span className="chip-count">{orderCounts[c.key]}</span>
+                <span className="chip-count">{orderCounts[c.key]}</span>
+                <span>{c.label}</span>
               </button>
             ))}
           </div>
