@@ -142,11 +142,18 @@ function fulfilmentTimestamp(order: WixOrder): string {
 }
 
 // Wix uses "Small"/"Medium"/"Large" on some products and "S"/"M"/"L" on
-// others, and stock_items mirrors whatever Wix had for that product. So
-// the name+size fallback match normalises both sides to the same
+// others. stock_items used to mirror whichever Wix had per product, but
+// migration 20260920000001 standardised it on the short forms, so the
+// two sides can now disagree for any product Wix spells out. The
+// name+size fallback match therefore normalises both sides to the same
 // vocabulary rather than requiring an exact string match.
+//
+// "one size fits all" is aliased for the same reason: that migration
+// renamed it to "One size" in stock_items, so a Wix line item still
+// carrying the long spelling would otherwise stop matching by name.
 const SIZE_ALIASES: Record<string, string> = {
   small: 's', medium: 'm', large: 'l',
+  'one size fits all': 'one size',
 };
 
 function normaliseSize(size: string): string {
