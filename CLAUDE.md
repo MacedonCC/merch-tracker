@@ -255,6 +255,14 @@ actually uses:
   shop" block below the order list; one with a shortfall stays in the
   main list, because owed stock is a real obligation however new the
   line is.
+  **Lines with `stock_items.retired_at` set are skipped entirely.** The
+  retired pre-2026 pants line still had 2 units of demand in last
+  season's window and was duly suggesting the club buy two more of a
+  product it no longer sells. Retirement could not be inferred from the
+  absence of a Wix link — an unlinked line may simply never have been
+  in the online shop while still being sold at the ground — so it is an
+  explicit column, admin-only, and never settable by a catalogue
+  import. Stock, orders and history on a retired line are untouched.
   `stock_items.created_at` is identical on every row (the date this
   repo's migrations first ran), so it cannot tell you when a line became
   sellable and must not be used for this.

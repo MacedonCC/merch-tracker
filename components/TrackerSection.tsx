@@ -459,6 +459,7 @@ export default function TrackerSection({
   const [orderSearch, setOrderSearch] = useState('');
   const [orderChip, setOrderChip] = useState<'all' | OrderState>('ready');
   const [listedAt, setListedAt] = useState<Map<string, string | null>>(new Map());
+  const [retired, setRetired] = useState<Set<string>>(new Set());
   const [showNoHistory, setShowNoHistory] = useState(false);
   const [pushing, setPushing] = useState(false);
   // Persistent, unlike flash(): a push result must not vanish after
@@ -475,18 +476,15 @@ export default function TrackerSection({
         .from('orders')
         .select('*, stock_items(name, size)')
         .order('ordered_at', { ascending: false }),
-      supabase.from('stock_items').select('id, wix_listed_at'),
+      supabase.from('stock_items').select('id, wix_listed_at, retired_at'),
     ]);
     setStock((s as StockRow[]) ?? []);
     setOrders((o as OrderRow[]) ?? []);
-    setListedAt(
-      new Map(
-        ((listed ?? []) as Array<{ id: string; wix_listed_at: string | null }>).map((r) => [
-          r.id,
-          r.wix_listed_at,
-        ])
-      )
-    );
+    const meta = (listed ?? []) as Array<{
+      id: string; wix_listed_at: string | null; retired_at: string | null;
+    }>;
+    setListedAt(new Map(meta.map((r) => [r.id, r.wix_listed_at])));
+    setRetired(new Set(meta.filter((r) => r.retired_at).map((r) => r.id)));
     setLoading(false);
   }
 
@@ -731,6 +729,11 @@ export default function TrackerSection({
 
     const byName = new Map<string, RestockGroup>();
     for (const s of stock) {
+      // A retired line is finished: it may have sold last season and
+      // may even be owed on, but the club no longer buys it, so it has
+      // no place on a list of what to order. Its stock, orders and
+      // history stay exactly as they are.
+      if (retired.has(s.id)) continue;
       // "No history" means the line COULD NOT have sold in the window,
       // which is a question about when it went on sale, not whether it
       // is linked today. wix_listed_at answers it directly; the old
@@ -784,7 +787,7 @@ export default function TrackerSection({
         return g;
       })
       .sort((a, b) => a.name.localeCompare(b.name));
-  }, [stock, orders, season, listedAt]);
+  }, [stock, orders, season, listedAt, retired]);
 
   // Split: anything to buy goes in the main list; the rest is new stock
   // with no sales history to judge it by.
@@ -1080,7 +1083,7 @@ export default function TrackerSection({
                         </td>
                         <td className="num">{l.available}</td>
                         <td className="num">
-                          {l.shortfall > 0 ? <span className="pill pill-out">{l.shortfall}</span> : '—'}
+                          {l.shortfall > 0 ? <span className="pill pill-short">{l.shortfall}</span> : '—'}
                         </td>
                         <td className="num restock-qty">{l.suggested}</td>
                       </tr>

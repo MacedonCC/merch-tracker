@@ -137,6 +137,10 @@ tbody tr:hover { background: rgba(255, 255, 255, 0.03); }
 .pill-ok { background-color: var(--accent-soft); color: var(--accent); }
 .pill-low { background-color: var(--warn-soft); color: var(--warn); }
 .pill-out { background-color: var(--alert-soft); color: var(--alert); }
+/* Owed on the restock page: the same purple as Short on the Stock
+   page, since both mean "people are owed more than we hold". Distinct
+   from .pill-out, which stays red for unpaid orders. */
+.pill-short { background-color: var(--tint-oversold); color: var(--stock-oversold); }
 .pill-grey { background-color: var(--wash); color: var(--ink-soft); border: 1px solid var(--line); }
 
 button, .btn {
@@ -702,15 +706,17 @@ button.matrix-line:hover { background-color: var(--tint); }
 .sell-big:has(.sell-btn-sub) { min-height: 84px; padding-top: 12px; padding-bottom: 12px; }
 
 /* ---------------- Restock: projected from last season's sales -------- */
+/* 1.15rem is the table cell gutter (see `td`), so these text blocks
+   line up with the columns instead of running to the card edges. */
 .restock-basis {
-  margin: 0 0 4px; padding: 0 0 12px;
+  margin: 0; padding: 0.75rem 1.15rem 0.9rem;
   font-size: 0.9rem; color: var(--ink-soft);
 }
 .restock-basis strong { color: var(--ink); font-weight: 600; }
 
 .restock-note {
-  margin-top: 12px; font-size: 0.82rem; line-height: 1.5;
-  color: var(--ink-faint);
+  margin: 0; padding: 1.1rem 1.15rem 1.2rem;
+  font-size: 0.82rem; line-height: 1.5; color: var(--ink-faint);
 }
 
 /* Product header spanning the grid, so sizes read as one block. */
@@ -749,10 +755,13 @@ th.num, td.num { text-align: right; }
 /* Restock: "new to the shop" block. Collapsed by default because it is
    context, not a shopping list — but never hidden, because a zero there
    would read as "didn't sell" when the truth is "wasn't for sale". */
-.restock-newblock { margin-top: 20px; border-top: 1px solid var(--line); padding-top: 14px; }
+.restock-newblock {
+  margin-top: 1.4rem; border-top: 1px solid var(--line);
+  padding: 0.5rem 0 1.4rem;
+}
 .restock-newblock-head {
   display: flex; align-items: center; gap: 8px; width: 100%;
-  background: none; border: none; padding: 6px 0; cursor: pointer;
+  background: none; border: none; padding: 0.7rem 1.15rem; cursor: pointer;
   font: inherit; font-size: 0.9rem; font-weight: 600; color: var(--ink-soft);
   text-align: left;
 }
