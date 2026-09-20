@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminSupabase } from '@/lib/supabase-server';
 import { tidyName, nameSizeKey } from '@/lib/types';
+import { pushAvailableToWix, pushEnabled } from '@/lib/wix-push';
 
 // This endpoint pulls the FULL order history from the Wix store and
 // records it. It pages through every order (no lookback window), so it
@@ -329,8 +330,33 @@ export async function GET(req: NextRequest) {
     }
   }
 
+  // Push the tracker's availability to the shop, HERE rather than on a
+  // schedule of its own. Between a Wix sale and this sync importing it,
+  // `committed` is stale-low, so `available` is stale-high — pushing in
+  // that window would raise Wix's count and re-offer something already
+  // sold. Running at the end of the sync means the day's orders are in
+  // first. Does nothing unless WIX_PUSH_ENABLED is true.
+  let push: unknown = { skipped: 'WIX_PUSH_ENABLED is not true' };
+  if (pushEnabled()) {
+    try {
+      const result = await pushAvailableToWix({ write: true, source: 'cron', pushedBy: 'wix-sync' });
+      push = {
+        wrote: result.wrote,
+        reason: result.reason,
+        ...result.counts,
+        failures: result.failures,
+      };
+    } catch (e) {
+      // A failed push must not fail the sync: the orders are already
+      // imported and re-running the sync to retry a push would be the
+      // wrong shape of fix.
+      push = { error: e instanceof Error ? e.message : 'Push failed.' };
+    }
+  }
+
   return NextResponse.json({
     ok: true,
+    wixPush: push,
     totalFetched: wixOrders.length,
     imported: toInsert.length,
     fulfilled,
