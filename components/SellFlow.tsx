@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { createClient } from '@/lib/supabase-client';
-import { money, sizeRank } from '@/lib/types';
+import { money, sizeRank, tidyName } from '@/lib/types';
 
 export interface SellItem {
   id: string;
@@ -128,7 +128,9 @@ export default function SellFlow({
 
   async function record(method: 'cash' | 'link', takenNow = false) {
     if (!chosen || !product) return;
-    const name = customer.trim();
+    // Normalised, not just trimmed: a name typed on a phone can pick up
+    // a double space mid-string as easily as a trailing one.
+    const name = tidyName(customer);
     if (!name) {
       setError('Enter who this is for.');
       setStep('who');

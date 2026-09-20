@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminSupabase } from '@/lib/supabase-server';
+import { tidyName } from '@/lib/types';
 
 // This endpoint pulls the FULL order history from the Wix store and
 // records it. It pages through every order (no lookback window), so it
@@ -249,8 +250,13 @@ export async function GET(req: NextRequest) {
 
     const contact =
       order.recipientInfo?.contactDetails ?? order.billingInfo?.contactDetails ?? {};
+    // Wix stores first and last names with their own stray whitespace,
+    // so joining them yields "Ollie  Neilsen". Normalising here keeps
+    // one person as one entry in the /sell type-ahead and in Orders
+    // grouping.
     const customerName =
-      [contact.firstName, contact.lastName].filter(Boolean).join(' ') || 'Wix customer';
+      tidyName([contact.firstName, contact.lastName].filter(Boolean).join(' ')) ||
+      'Wix customer';
 
     const isFulfilled = order.fulfillmentStatus === 'FULFILLED';
 

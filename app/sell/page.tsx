@@ -4,7 +4,7 @@ import { createServerSupabase } from '@/lib/supabase-server';
 import Header from '@/components/Header';
 import NotOnCommitteeList from '@/components/NotOnCommitteeList';
 import SellFlow, { type SellItem } from '@/components/SellFlow';
-import { initials } from '@/lib/types';
+import { initials, tidyName } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
 
@@ -59,7 +59,7 @@ export default async function SellPage() {
   // keeping whichever spelling was seen first.
   const seen = new Map<string, string>();
   for (const row of (names ?? []) as Array<{ customer_name: string | null }>) {
-    const name = row.customer_name?.trim();
+    const name = row.customer_name ? tidyName(row.customer_name) : '';
     if (!name) continue;
     const key = name.toLowerCase();
     if (!seen.has(key)) seen.set(key, name);

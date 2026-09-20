@@ -56,6 +56,17 @@ export function sizeRank(size: string): number {
   return i === -1 ? SIZE_ORDER.length : i;
 }
 
+// Customer names arrive with stray whitespace — Wix stores first and
+// last names with their own trailing spaces, and joining them yields
+// "Ollie  Neilsen"; hand-typed names pick up a trailing space from a
+// phone keyboard. Untidy names split one person into several entries in
+// the /sell type-ahead and break customer grouping on Orders, so every
+// write path normalises through here rather than each doing its own
+// trim. \s covers tabs and newlines as well as spaces.
+export function tidyName(name: string): string {
+  return name.replace(/\s+/g, ' ').trim();
+}
+
 export function money(n: number): string {
   return new Intl.NumberFormat('en-AU', { style: 'currency', currency: 'AUD' }).format(n);
 }
