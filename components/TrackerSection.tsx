@@ -935,14 +935,27 @@ export default function TrackerSection({
         <div className="card">
           <div className="card-head">
             <h2>Inventory</h2>
-            {isAdmin && (
-              <div className="head-actions">
-                <button className="btn-mini" disabled={pushing} onClick={pushToWix}>
-                  {pushing ? 'Pushing…' : 'Push to Wix now'}
-                </button>
-                <button className="btn-solid" onClick={() => setModal('item')}>Add item</button>
-              </div>
-            )}
+            {/* Buttons and legend share a right-hand column so the
+                legend sits directly under the actions. It stays outside
+                the isAdmin guard: a helper cannot add items but still
+                needs to read the grid. */}
+            <div className="head-right">
+              {isAdmin && (
+                <div className="head-actions">
+                  <button className="btn-mini" disabled={pushing} onClick={pushToWix}>
+                    {pushing ? 'Pushing…' : 'Push to Wix now'}
+                  </button>
+                  <button className="btn-solid" onClick={() => setModal('item')}>Add item</button>
+                </div>
+              )}
+            <div className="matrix-legend" aria-hidden="true">
+              <span className="matrix-key matrix-ok">In stock</span>
+              <span className="matrix-key matrix-low">Low</span>
+              <span className="matrix-key matrix-out">None left</span>
+              <span className="matrix-key matrix-oversold">Short</span>
+              <span className="matrix-key matrix-notoffered">Not offered</span>
+            </div>
+            </div>
           </div>
 
           {pushSummary && (
@@ -1006,13 +1019,6 @@ export default function TrackerSection({
                     ))}
                   </tbody>
                 </table>
-              </div>
-              <div className="matrix-legend" aria-hidden="true">
-                <span className="matrix-key matrix-ok">In stock</span>
-                <span className="matrix-key matrix-low">Low</span>
-                <span className="matrix-key matrix-out">None left</span>
-                <span className="matrix-key matrix-oversold">Short</span>
-                <span className="matrix-key"><span className="matrix-none">–</span> Not made in that size</span>
               </div>
             </>
           )}
