@@ -190,14 +190,37 @@ actually uses:
   Items with `target_level = 0` never suggest an order.
 - `stock_status` — `ok | low | out | oversold`.
 
-Stock quantity itself only changes via triggers (`handle_new_order` /
-`handle_deleted_order` in `supabase/schema.sql`), fired on `orders`
-INSERT/DELETE — never on UPDATE. This is why `wix-sync` sets
-`distributed_at` in the same INSERT as the rest of a historical order's row
-rather than inserting then updating: an UPDATE wouldn't touch stock (trigger
-doesn't fire), but doing it as insert+update would double-deduct via a
-different code path. See the long comment at the top of
-`app/api/wix-sync/route.ts` before changing order-insert logic.
+Stock quantity itself only changes via two triggers on `orders`, and
+**neither fires on INSERT** — stock moves on handover, not on sale
+(moved there in migration-002, which isn't in this repo; see
+`supabase/MIGRATIONS.md`). `supabase/schema.sql` still shows the
+original INSERT/DELETE pair and is wrong about this, like the rest of
+its drift:
+
+- `on_distribution_change` (AFTER UPDATE, `handle_distribution_change`)
+  deducts when `distributed_at` goes null → not-null, using
+  `quantity = greatest(0, quantity - new.quantity)` so it clamps at zero
+  rather than going negative, and adds the quantity back on the reverse
+  transition. It writes its own `stock_movements` row either way.
+- `on_order_removed` (AFTER DELETE, `handle_order_removed`) restores
+  stock only if the deleted order had already been handed over.
+
+This is why `wix-sync` sets `distributed_at` in the same INSERT as the
+rest of a historical order's row rather than inserting then updating: an
+INSERT fires no trigger at all, so an already-fulfilled order is recorded
+as handed over without deducting stock, whereas insert-then-update would
+fire `on_distribution_change` and wrongly deduct it. See the long comment
+at the top of `app/api/wix-sync/route.ts` before changing order-insert
+logic.
+
+One gotcha for maintenance scripts: `check_order_update` (BEFORE UPDATE)
+resolves the caller with `auth.jwt() ->> 'email'` and raises
+`Not authorised to update orders.` when there is no JWT at all. Any bulk
+update run as plain SQL (`supabase db query`, psql) must therefore
+`set_config('request.jwt.claims', '{"email":"<an admin>"}', true)` inside
+the transaction first, or every row aborts — this is separate from, and
+additional to, disabling `on_distribution_change` when a backfill must not
+move stock.
 
 Every stock change is logged to `stock_movements` — treat it as the audit
 trail when a quantity looks wrong, rather than reasoning from `stock_items`
