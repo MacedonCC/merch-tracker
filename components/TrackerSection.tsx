@@ -408,6 +408,7 @@ export default function TrackerSection({
   const [orderChip, setOrderChip] = useState<'all' | OrderState>('ready');
   const [listedAt, setListedAt] = useState<Map<string, string | null>>(new Map());
   const [showNoHistory, setShowNoHistory] = useState(false);
+  const [pushing, setPushing] = useState(false);
 
   async function load() {
     // wix_listed_at lives on stock_items, not on the stock_overview
@@ -524,6 +525,40 @@ export default function TrackerSection({
     setModal(null);
     flash('Order recorded.');
     load();
+  }
+
+  // Sets Wix inventory from the tracker's `available`, taking spoken-for
+  // sizes off sale. Reports first, then asks: this changes the public
+  // shop, so it should not happen on a single stray tap. Writing is
+  // refused server-side unless WIX_PUSH_ENABLED is set, and the report
+  // says so plainly rather than looking like it worked.
+  async function pushToWix() {
+    setPushing(true);
+    try {
+      const preview = await fetch('/api/wix-push').then((r) => r.json());
+      if (!preview.ok) {
+        flash(preview.reason ?? preview.error ?? 'Could not reach Wix.');
+        return;
+      }
+      const { wouldBlock, wouldStayOnSale, linesConsidered, skipped } = preview.counts;
+      const summary =
+        `Set ${linesConsidered} sizes in Wix?\n\n` +
+        `${wouldStayOnSale} stay on sale\n` +
+        `${wouldBlock} go to zero (blocked online)\n` +
+        (skipped ? `${skipped} skipped — no Wix link\n` : '') +
+        (preview.pushEnabled
+          ? ''
+          : '\nWIX_PUSH_ENABLED is off, so nothing will be sent.');
+      if (!window.confirm(summary)) return;
+
+      const result = await fetch('/api/wix-push', { method: 'POST' }).then((r) => r.json());
+      flash(result.reason ?? (result.wrote ? 'Pushed to Wix.' : 'Nothing was sent.'));
+      load();
+    } catch {
+      flash('Could not reach Wix.');
+    } finally {
+      setPushing(false);
+    }
   }
 
   async function markPaid(id: string) {
@@ -822,7 +857,14 @@ export default function TrackerSection({
         <div className="card">
           <div className="card-head">
             <h2>Inventory</h2>
-            {isAdmin && <button className="btn-solid" onClick={() => setModal('item')}>Add item</button>}
+            {isAdmin && (
+              <div className="head-actions">
+                <button className="btn-mini" disabled={pushing} onClick={pushToWix}>
+                  {pushing ? 'Pushing…' : 'Push to Wix now'}
+                </button>
+                <button className="btn-solid" onClick={() => setModal('item')}>Add item</button>
+              </div>
+            )}
           </div>
           <div className="filters">
             <input placeholder="Search items" value={search} onChange={(e) => setSearch(e.target.value)} />

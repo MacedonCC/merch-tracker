@@ -702,3 +702,6 @@ th.num, td.num { text-align: right; }
   text-align: left;
 }
 .restock-newblock-head:hover { color: var(--ink); }
+
+/* Card header with more than one action. */
+.head-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
