@@ -2,6 +2,7 @@
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createClient } from '@/lib/supabase-client';
+import { sizeRank } from '@/lib/types';
 import type { MemberPermissions } from '@/lib/member';
 
 // The nearest ancestor that would clip an overflowing child (the
@@ -120,6 +121,56 @@ interface OrderRow {
 
 const money = (n: number) =>
   new Intl.NumberFormat('en-AU', { style: 'currency', currency: 'AUD' }).format(n);
+
+// ---- Restock: demand from last season's sales -----------------------
+// The season runs 1 Aug to 28 Feb. Restock projects this season's needs
+// from the SAME window last season, which is the only like-for-like
+// comparison available — a cricket club's sales are violently seasonal,
+// so comparing against a trailing 12 months or a rolling 90 days would
+// read August's spike as growth and April's silence as collapse.
+//
+// Dates come from orders.ordered_at (when it was placed), not
+// created_at (when the row was imported — the historical Wix backfill
+// would stack years of orders onto one afternoon) and not
+// distributed_at (when it was collected, which is fulfilment, not
+// demand).
+//
+// Bounds are half-open. An inclusive `<= 28 Feb` would resolve to
+// midnight at the START of the 28th and silently drop that whole day.
+// Dates are built with the Date constructor rather than parsed from a
+// string, so the window is local midnight in the viewer's timezone
+// rather than UTC — a 9am Melbourne order on 1 Aug is 23:00 UTC on 31
+// July, and a UTC window would miss it.
+function lastSeasonWindow(now = new Date()): { start: Date; end: Date; label: string } {
+  // Aug-Dec belongs to the season named for this year; Jan-Jul is the
+  // tail of the season that started last year.
+  const seasonStartYear = now.getMonth() >= 7 ? now.getFullYear() : now.getFullYear() - 1;
+  const start = new Date(seasonStartYear - 1, 7, 1);
+  const end = new Date(seasonStartYear, 2, 1);
+  return {
+    start,
+    end,
+    label: `1 Aug ${seasonStartYear - 1} – 28 Feb ${seasonStartYear}`,
+  };
+}
+
+interface RestockLine {
+  id: string;
+  size: string;
+  price: number;
+  available: number;
+  shortfall: number;
+  /** null when the line could not have sold in the window at all. */
+  demand: number | null;
+  suggested: number;
+}
+
+interface RestockGroup {
+  name: string;
+  lines: RestockLine[];
+  units: number;
+  value: number;
+}
 
 const formatDate = (iso: string) => new Date(iso).toLocaleDateString('en-AU');
 
@@ -483,14 +534,79 @@ export default function TrackerSection({
   // ---- Derived -------------------------------------------------------
   const byId = new Map(stock.map((s) => [s.id, s]));
 
-  const restock = stock
-    .filter((s) => s.suggested_order > 0)
-    .sort((a, b) => b.shortfall - a.shortfall || b.suggested_order - a.suggested_order);
+  // Restock is projected from last season's sales, NOT target_level.
+  // target_level is left in place on stock_items and still drives
+  // stock_overview.suggested_order; this page simply stops reading it.
+  const season = useMemo(() => lastSeasonWindow(), []);
+
+  const restockGroups = useMemo<RestockGroup[]>(() => {
+    // Demand = units ordered in the window, counting an order once it
+    // is either paid or handed over. An order that is neither is an
+    // abandoned payment link, and counting it would let someone inflate
+    // next season's buy by starting checkouts they never finish.
+    const demandById = new Map<string, number>();
+    for (const o of orders) {
+      if (!o.stock_item_id) continue;
+      if (o.payment_status !== 'paid' && !o.distributed_at) continue;
+      const placed = new Date(o.ordered_at);
+      if (placed < season.start || placed >= season.end) continue;
+      demandById.set(o.stock_item_id, (demandById.get(o.stock_item_id) ?? 0) + o.quantity);
+    }
+
+    const byName = new Map<string, RestockGroup>();
+    for (const s of stock) {
+      const sold = demandById.get(s.id);
+      // "No history" is reserved for lines that COULD NOT have sold in
+      // the window — ones never linked to the Wix shop. A Wix-linked
+      // line with no sales genuinely sold none, and reads as 0.
+      // (stock_items.created_at is identical on every row, the date this
+      // repo's migrations ran, so it cannot tell us when a line became
+      // sellable and is deliberately not used here.)
+      const demand = sold ?? (s.wix_product_id ? 0 : null);
+
+      // shortfall is shown but NOT added to the suggestion: it equals
+      // -available whenever stock is oversold, so adding both would
+      // count the oversold units twice.
+      const suggested = Math.max(0, Math.ceil((demand ?? 0) - s.available));
+
+      // A line with known demand and nothing to buy is simply not on the
+      // shopping list. A "No history" line always stays visible even at
+      // zero, because zero there is an absence of evidence, not evidence
+      // of no demand — hiding it would be exactly the silent
+      // zero-treatment this page is meant to avoid.
+      if (suggested === 0 && demand !== null) continue;
+
+      const line: RestockLine = {
+        id: s.id,
+        size: s.size,
+        price: s.price,
+        available: s.available,
+        shortfall: s.shortfall,
+        demand,
+        suggested,
+      };
+      const group = byName.get(s.name);
+      if (group) group.lines.push(line);
+      else byName.set(s.name, { name: s.name, lines: [line], units: 0, value: 0 });
+    }
+
+    return Array.from(byName.values())
+      .map((g) => {
+        g.lines.sort((a, b) => sizeRank(a.size) - sizeRank(b.size));
+        g.units = g.lines.reduce((n, l) => n + l.suggested, 0);
+        g.value = g.lines.reduce((n, l) => n + l.suggested * l.price, 0);
+        return g;
+      })
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [stock, orders, season]);
+
+  const restockUnits = restockGroups.reduce((n, g) => n + g.units, 0);
+  const restockValue = restockGroups.reduce((n, g) => n + g.value, 0);
 
   const totalOnHand = stock.reduce((n, s) => n + s.on_hand, 0);
   const totalCommitted = stock.reduce((n, s) => n + s.committed, 0);
   const totalShort = stock.reduce((n, s) => n + s.shortfall, 0);
-  const toOrder = restock.reduce((n, s) => n + s.suggested_order, 0);
+  const toOrder = restockUnits;
   const owed = orders
     .filter((o) => o.payment_status === 'pending')
     .reduce((n, o) => n + o.unit_price * o.quantity, 0);
@@ -689,31 +805,78 @@ export default function TrackerSection({
           <div className="card-head">
             <h2>What to order</h2>
             <button onClick={() => {
-              const lines = restock.map((s) => `${s.suggested_order} x ${s.name} — ${s.size}`).join('\n');
+              const lines = restockGroups
+                .flatMap((g) => g.lines.map((l) => `${l.suggested} x ${g.name} — ${l.size}`))
+                .join('\n');
               navigator.clipboard.writeText(lines);
               flash('Order list copied.');
             }}>Copy list</button>
           </div>
-          <table>
-            <thead>
-              <tr><th>Item</th><th>Size</th><th>On hand</th><th>Owed</th><th>Short</th><th>Target</th><th>Order</th></tr>
-            </thead>
-            <tbody>
-              {restock.length === 0 ? (
-                <tr><td colSpan={7}><div className="empty">Nothing to order. Every size is at or above its target.</div></td></tr>
-              ) : restock.map((s) => (
-                <tr key={s.id}>
-                  <td><strong style={{ fontWeight: 500 }}>{s.name}</strong></td>
-                  <td>{s.size}</td>
-                  <td>{s.on_hand}</td>
-                  <td>{s.committed || '—'}</td>
-                  <td>{s.shortfall > 0 ? <span className="pill pill-out">{s.shortfall}</span> : '—'}</td>
-                  <td>{s.target_level}</td>
-                  <td style={{ fontWeight: 500, fontSize: '1rem' }}>{s.suggested_order}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+
+          <p className="restock-basis">
+            Projected from sales in <strong>{season.label}</strong>, the same
+            window last season. Suggested order is last season&rsquo;s demand
+            less what&rsquo;s available now.
+          </p>
+
+          {restockGroups.length === 0 ? (
+            <div className="empty">
+              Nothing to order. Every size covers last season&rsquo;s demand.
+            </div>
+          ) : (
+            <>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Size</th>
+                    <th className="num">Sold last season</th>
+                    <th className="num">Available</th>
+                    <th className="num">Owed</th>
+                    <th className="num">Order</th>
+                  </tr>
+                </thead>
+                {restockGroups.map((g) => (
+                  <tbody key={g.name}>
+                    <tr className="restock-product">
+                      <th colSpan={5} scope="colgroup">{g.name}</th>
+                    </tr>
+                    {g.lines.map((l) => (
+                      <tr key={l.id}>
+                        <td>{l.size}</td>
+                        <td className="num">
+                          {l.demand === null
+                            ? <span className="restock-nohistory">No history</span>
+                            : l.demand}
+                        </td>
+                        <td className="num">{l.available}</td>
+                        <td className="num">
+                          {l.shortfall > 0 ? <span className="pill pill-out">{l.shortfall}</span> : '—'}
+                        </td>
+                        <td className="num restock-qty">{l.suggested}</td>
+                      </tr>
+                    ))}
+                    <tr className="restock-subtotal">
+                      <td colSpan={4}>{g.name} subtotal</td>
+                      <td className="num">{g.units} &middot; {money(g.value)}</td>
+                    </tr>
+                  </tbody>
+                ))}
+                <tfoot>
+                  <tr>
+                    <td colSpan={4}>Total to order</td>
+                    <td className="num">{restockUnits} units &middot; {money(restockValue)}</td>
+                  </tr>
+                </tfoot>
+              </table>
+              <p className="restock-note">
+                &ldquo;No history&rdquo; marks a line never linked to the Wix
+                shop, so there is no sales record to project from. Those stay
+                listed even at zero &mdash; judge them by eye rather than
+                reading zero as no demand. Owed is shown for context and is not
+                added on top: it is already reflected in a negative Available.
+              </p>
+            </>
+          )}
         </div>
       )}
 

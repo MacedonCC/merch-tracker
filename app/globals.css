@@ -645,3 +645,42 @@ button.matrix-line:hover { background-color: var(--tint); }
   line-height: 1.3; white-space: normal;
 }
 .sell-big:has(.sell-btn-sub) { min-height: 84px; padding-top: 12px; padding-bottom: 12px; }
+
+/* ---------------- Restock: projected from last season's sales -------- */
+.restock-basis {
+  margin: 0 0 4px; padding: 0 0 12px;
+  font-size: 0.9rem; color: var(--ink-soft);
+}
+.restock-basis strong { color: var(--ink); font-weight: 600; }
+
+.restock-note {
+  margin-top: 12px; font-size: 0.82rem; line-height: 1.5;
+  color: var(--ink-faint);
+}
+
+/* Product header spanning the grid, so sizes read as one block. */
+.restock-product th {
+  text-align: left; padding-top: 16px;
+  font-size: 0.95rem; font-weight: 650; color: var(--ink);
+  border-bottom: 1px solid var(--line-strong);
+}
+.restock-subtotal td {
+  border-top: 1px solid var(--line);
+  font-size: 0.85rem; color: var(--ink-soft);
+}
+.restock-subtotal td.num { color: var(--ink); font-weight: 600; white-space: nowrap; }
+
+.restock-qty { font-weight: 700; font-size: 1.05rem; }
+.restock-nohistory {
+  font-size: 0.78rem; color: var(--ink-faint); font-style: italic;
+  white-space: nowrap;
+}
+
+tfoot td {
+  border-top: 2px solid var(--line-strong);
+  padding-top: 12px; font-weight: 700; font-size: 0.95rem; color: var(--ink);
+}
+tfoot td.num { white-space: nowrap; }
+
+/* Numeric columns align right so quantities compare down the column. */
+th.num, td.num { text-align: right; }

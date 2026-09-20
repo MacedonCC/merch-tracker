@@ -203,6 +203,25 @@ actually uses:
 - `suggested_order` — non-zero only once `available` drops to
   `low_stock_alert` or stock is oversold, topping back up to `target_level`.
   Items with `target_level = 0` never suggest an order.
+  **The `/restock` page no longer reads this field.** It projects demand
+  from sales in the same season window last year (1 Aug – 28 Feb,
+  local midnight, half-open so 28 Feb isn't dropped) and suggests
+  `max(0, demand − available)`. `target_level` and this column both stay
+  in place for the Stock page; restock simply stopped using them.
+  Two traps in that formula: `shortfall` equals `−available` whenever
+  stock is oversold, so adding both double-counts the oversold units —
+  it is displayed but never added. And an order counts toward demand
+  once it is paid *or* handed over, so an abandoned payment link cannot
+  inflate next season's buy.
+  Lines never linked to Wix show "No history" rather than 0 and stay
+  visible even when they suggest nothing, since zero there is an absence
+  of evidence. Note that `wix_product_id IS NULL` does not actually
+  prove a line never sold — `wix-sync`'s name+size fallback can match an
+  unlinked row, and Social Polo Shirt JNR14/JNR16 did exactly that — so
+  real sales always take precedence over the label.
+  `stock_items.created_at` is identical on every row (the date this
+  repo's migrations first ran), so it cannot tell you when a line became
+  sellable and must not be used for this.
 - `stock_status` — `ok | low | out | oversold`.
 
 Stock quantity itself only changes via two triggers on `orders`, and
