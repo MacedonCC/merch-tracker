@@ -67,6 +67,30 @@ export function tidyName(name: string): string {
   return name.replace(/\s+/g, ' ').trim();
 }
 
+// Wix spells sizes inconsistently across products - "Small" on some,
+// "S" on others - and migration 20260920000001 standardised the tracker
+// on the short forms, so the two sides can disagree for any product Wix
+// spells out. Both wix-sync (matching an order line to a stock row) and
+// wix-import (matching a catalogue entry to a stock row) normalise
+// through here before comparing. It lives in one place because the two
+// MUST agree: a size that imports under one spelling and syncs under
+// another silently creates a duplicate line that never receives orders.
+const SIZE_ALIASES: Record<string, string> = {
+  small: 's', medium: 'm', large: 'l',
+  'one size fits all': 'one size',
+};
+
+export function normaliseSize(size: string): string {
+  const key = tidyName(size).toLowerCase();
+  return SIZE_ALIASES[key] ?? key;
+}
+
+// The key both Wix matchers use to line a catalogue entry up with a
+// stock_items row when there is no variant id to go on.
+export function nameSizeKey(name: string, size: string): string {
+  return `${tidyName(name).toLowerCase()}::${normaliseSize(size)}`;
+}
+
 export function money(n: number): string {
   return new Intl.NumberFormat('en-AU', { style: 'currency', currency: 'AUD' }).format(n);
 }

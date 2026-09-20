@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminSupabase } from '@/lib/supabase-server';
-import { tidyName } from '@/lib/types';
+import { tidyName, normaliseSize } from '@/lib/types';
 
 // This endpoint pulls the FULL order history from the Wix store and
 // records it. It pages through every order (no lookback window), so it
@@ -140,26 +140,6 @@ async function fetchWixOrders(limit: number): Promise<WixOrder[]> {
 
 function fulfilmentTimestamp(order: WixOrder): string {
   return order.fulfillments?.[0]?.dateCreated ?? order.createdDate ?? new Date().toISOString();
-}
-
-// Wix uses "Small"/"Medium"/"Large" on some products and "S"/"M"/"L" on
-// others. stock_items used to mirror whichever Wix had per product, but
-// migration 20260920000001 standardised it on the short forms, so the
-// two sides can now disagree for any product Wix spells out. The
-// name+size fallback match therefore normalises both sides to the same
-// vocabulary rather than requiring an exact string match.
-//
-// "one size fits all" is aliased for the same reason: that migration
-// renamed it to "One size" in stock_items, so a Wix line item still
-// carrying the long spelling would otherwise stop matching by name.
-const SIZE_ALIASES: Record<string, string> = {
-  small: 's', medium: 'm', large: 'l',
-  'one size fits all': 'one size',
-};
-
-function normaliseSize(size: string): string {
-  const key = size.trim().toLowerCase();
-  return SIZE_ALIASES[key] ?? key;
 }
 
 export async function GET(req: NextRequest) {

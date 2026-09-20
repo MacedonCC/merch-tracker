@@ -285,6 +285,29 @@ won't re-run it, so editing it in place only desyncs the repo from the live
 database (this happened once; migration-006 exists to correct migration-005
 rather than editing it). Write a new migration instead.
 
+### Wix catalogue import (`app/api/wix-import/route.ts`)
+
+Reconciles the Wix catalogue against `stock_items`: links existing lines
+to their Wix product/variant, brings prices across, and creates a line
+at `quantity 0` for any Wix size the tracker lacks. **`?dryRun=1`
+writes nothing and returns the identical report — always run that
+first.**
+
+It never writes `quantity` on a row that already exists. The original
+version upserted on `(name, size)` with `quantity: 0` in the payload,
+which on a match would have zeroed the real cupboard count. That is now
+structurally impossible, not merely avoided: migration
+`20260920000007` lets a service-role caller through
+`check_stock_item_update` for `image_url`, `wix_product_url`,
+`wix_product_id`, `wix_variant_id` and `price` only, so an update
+carrying `quantity` — even bundled with an allowed column — is refused
+by the database.
+
+Matching is by name + size via `nameSizeKey()` in `lib/types.ts`, shared
+with `wix-sync`'s fallback so the two cannot drift. A size that imports
+under one spelling and syncs under another would create a line that
+silently never receives orders.
+
 ### Wix sync (`app/api/wix-sync/route.ts`)
 
 Pulls the full paid-order history from Wix (no lookback window, so it's
