@@ -68,6 +68,7 @@ interface StockRow {
   quantity: number;
   wix_product_id: string | null;
   wix_variant_id: string | null;
+  wix_listed_at: string | null;
 }
 
 /** One Wix catalogue entry: a product/size pair and what it costs. */
@@ -221,7 +222,7 @@ export async function GET(req: NextRequest) {
   const supabase = createAdminSupabase();
   const { data: stock } = await supabase
     .from('stock_items')
-    .select('id, name, size, price, quantity, wix_product_id, wix_variant_id');
+    .select('id, name, size, price, quantity, wix_product_id, wix_variant_id, wix_listed_at');
 
   const rows = (stock ?? []) as StockRow[];
 
@@ -345,6 +346,7 @@ export async function GET(req: NextRequest) {
   const claimed = new Map<string, string>();
   const duplicateWixSizes: string[] = [];
 
+  const now = new Date().toISOString();
   const inserts: Array<Record<string, unknown>> = [];
   const updates: Array<{ id: string; patch: Record<string, unknown>; label: string }> = [];
 
@@ -401,12 +403,20 @@ export async function GET(req: NextRequest) {
           low_stock_alert: 3,
           wix_product_id: entry.productId,
           wix_variant_id: entry.variantId,
+          wix_listed_at: now,
         });
         continue;
       }
 
-      // Only ever these three columns, never quantity.
+      // Only ever these columns, never quantity.
       const patch: Record<string, unknown> = {};
+      // Stamped the first time a line is linked, and never again -
+      // /restock reads it to tell "was on sale and sold none" apart
+      // from "was not on sale yet". Re-stamping on a later run would
+      // make an old line look new and wipe out its sales history. The
+      // database enforces this too (migration 20260920000009), so a
+      // future edit here cannot quietly undo it.
+      if (!existing.wix_listed_at) patch.wix_listed_at = now;
       if (existing.wix_product_id !== entry.productId) patch.wix_product_id = entry.productId;
       if (existing.wix_variant_id !== entry.variantId) patch.wix_variant_id = entry.variantId;
       if (Number(existing.price) !== Number(entry.price)) patch.price = entry.price;
@@ -429,9 +439,10 @@ export async function GET(req: NextRequest) {
         ...(patch.price !== undefined
           ? { price: `${Number(existing.price)} -> ${Number(entry.price)}` }
           : {}),
+        ...(patch.wix_listed_at !== undefined ? { firstListedNow: true } : {}),
       });
 
-      patch.updated_at = new Date().toISOString();
+      patch.updated_at = now;
       updates.push({ id: existing.id, patch, label: `${existing.name} / ${existing.size}` });
     }
   }

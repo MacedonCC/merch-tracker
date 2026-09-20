@@ -406,17 +406,31 @@ export default function TrackerSection({
   const [level, setLevel] = useState('');
   const [orderSearch, setOrderSearch] = useState('');
   const [orderChip, setOrderChip] = useState<'all' | OrderState>('ready');
+  const [listedAt, setListedAt] = useState<Map<string, string | null>>(new Map());
+  const [showNoHistory, setShowNoHistory] = useState(false);
 
   async function load() {
-    const [{ data: s }, { data: o }] = await Promise.all([
+    // wix_listed_at lives on stock_items, not on the stock_overview
+    // view, so it is fetched alongside and merged by id rather than
+    // reshaping the view.
+    const [{ data: s }, { data: o }, { data: listed }] = await Promise.all([
       supabase.from('stock_overview').select('*').order('name').order('size'),
       supabase
         .from('orders')
         .select('*, stock_items(name, size)')
         .order('ordered_at', { ascending: false }),
+      supabase.from('stock_items').select('id, wix_listed_at'),
     ]);
     setStock((s as StockRow[]) ?? []);
     setOrders((o as OrderRow[]) ?? []);
+    setListedAt(
+      new Map(
+        ((listed ?? []) as Array<{ id: string; wix_listed_at: string | null }>).map((r) => [
+          r.id,
+          r.wix_listed_at,
+        ])
+      )
+    );
     setLoading(false);
   }
 
@@ -608,25 +622,35 @@ export default function TrackerSection({
 
     const byName = new Map<string, RestockGroup>();
     for (const s of stock) {
+      // "No history" means the line COULD NOT have sold in the window,
+      // which is a question about when it went on sale, not whether it
+      // is linked today. wix_listed_at answers it directly; the old
+      // proxy ("is it linked to Wix?") broke the moment a catalogue
+      // import linked 39 lines at once, making every one of them read
+      // as having sold nothing last season.
+      //
+      // Real sales always win. If a line sold in the window it self
+      // evidently was on sale, whatever its recorded listing date says.
       const sold = demandById.get(s.id);
-      // "No history" is reserved for lines that COULD NOT have sold in
-      // the window — ones never linked to the Wix shop. A Wix-linked
-      // line with no sales genuinely sold none, and reads as 0.
-      // (stock_items.created_at is identical on every row, the date this
-      // repo's migrations ran, so it cannot tell us when a line became
-      // sellable and is deliberately not used here.)
-      const demand = sold ?? (s.wix_product_id ? 0 : null);
+      const listed = listedAt.get(s.id);
+      const onSaleBeforeSeason = listed ? new Date(listed) < season.start : false;
+      const demand = sold ?? (onSaleBeforeSeason ? 0 : null);
 
       // shortfall is shown but NOT added to the suggestion: it equals
       // -available whenever stock is oversold, so adding both would
       // count the oversold units twice.
       const suggested = Math.max(0, Math.ceil((demand ?? 0) - s.available));
 
-      // A line with known demand and nothing to buy is simply not on the
-      // shopping list. A "No history" line always stays visible even at
-      // zero, because zero there is an absence of evidence, not evidence
-      // of no demand — hiding it would be exactly the silent
-      // zero-treatment this page is meant to avoid.
+      // A line with known demand and nothing to buy is simply not on
+      // the shopping list. A "No history" line with nothing to buy is
+      // not either, but it is not hidden: it moves to the collapsed
+      // "new to the shop" block below, so an absence of evidence is
+      // never silently rendered as a zero.
+      //
+      // A "No history" line WITH something to buy stays in the main
+      // list, because that quantity comes from a shortfall - paid
+      // orders the cupboard cannot fill - which is a real obligation
+      // regardless of how new the line is.
       if (suggested === 0 && demand !== null) continue;
 
       const line: RestockLine = {
@@ -651,10 +675,26 @@ export default function TrackerSection({
         return g;
       })
       .sort((a, b) => a.name.localeCompare(b.name));
-  }, [stock, orders, season]);
+  }, [stock, orders, season, listedAt]);
 
-  const restockUnits = restockGroups.reduce((n, g) => n + g.units, 0);
-  const restockValue = restockGroups.reduce((n, g) => n + g.value, 0);
+  // Split: anything to buy goes in the main list; the rest is new stock
+  // with no sales history to judge it by.
+  const restockOrder = restockGroups
+    .map((g) => ({ ...g, lines: g.lines.filter((l) => l.suggested > 0) }))
+    .filter((g) => g.lines.length > 0)
+    .map((g) => ({
+      ...g,
+      units: g.lines.reduce((n, l) => n + l.suggested, 0),
+      value: g.lines.reduce((n, l) => n + l.suggested * l.price, 0),
+    }));
+
+  const noHistoryGroups = restockGroups
+    .map((g) => ({ ...g, lines: g.lines.filter((l) => l.suggested === 0 && l.demand === null) }))
+    .filter((g) => g.lines.length > 0);
+  const noHistoryCount = noHistoryGroups.reduce((n, g) => n + g.lines.length, 0);
+
+  const restockUnits = restockOrder.reduce((n, g) => n + g.units, 0);
+  const restockValue = restockOrder.reduce((n, g) => n + g.value, 0);
 
   const totalOnHand = stock.reduce((n, s) => n + s.on_hand, 0);
   const totalCommitted = stock.reduce((n, s) => n + s.committed, 0);
@@ -858,7 +898,7 @@ export default function TrackerSection({
           <div className="card-head">
             <h2>What to order</h2>
             <button onClick={() => {
-              const lines = restockGroups
+              const lines = restockOrder
                 .flatMap((g) => g.lines.map((l) => `${l.suggested} x ${g.name} — ${l.size}`))
                 .join('\n');
               navigator.clipboard.writeText(lines);
@@ -872,7 +912,7 @@ export default function TrackerSection({
             less what&rsquo;s available now.
           </p>
 
-          {restockGroups.length === 0 ? (
+          {restockOrder.length === 0 ? (
             <div className="empty">
               Nothing to order. Every size covers last season&rsquo;s demand.
             </div>
@@ -884,7 +924,7 @@ export default function TrackerSection({
                     header scrolls away, and "Sold last season" vs
                     "Available" vs "Order" are three similar-looking
                     numbers to be guessing at from memory. */}
-                {restockGroups.map((g) => (
+                {restockOrder.map((g) => (
                   <tbody key={g.name}>
                     <tr className="restock-product">
                       <th colSpan={5} scope="colgroup">{g.name}</th>
@@ -925,13 +965,57 @@ export default function TrackerSection({
                 </tfoot>
               </table>
               <p className="restock-note">
-                &ldquo;No history&rdquo; marks a line never linked to the Wix
-                shop, so there is no sales record to project from. Those stay
-                listed even at zero &mdash; judge them by eye rather than
-                reading zero as no demand. Owed is shown for context and is not
-                added on top: it is already reflected in a negative Available.
+                Owed is shown for context and is not added on top: it is
+                already reflected in a negative Available. A line marked
+                &ldquo;No history&rdquo; here went on sale after the window, so
+                there is nothing to project from &mdash; it is listed because
+                orders are owed on it, not because of past demand.
               </p>
             </>
+          )}
+
+          {noHistoryCount > 0 && (
+            <div className="restock-newblock">
+              <button
+                className="restock-newblock-head"
+                aria-expanded={showNoHistory}
+                onClick={() => setShowNoHistory((v) => !v)}
+              >
+                <span aria-hidden="true">{showNoHistory ? '▾' : '▸'}</span>
+                New to the shop &mdash; no sales history yet ({noHistoryCount})
+              </button>
+              {showNoHistory && (
+                <>
+                  <p className="restock-note">
+                    These went on sale after {season.label}, so last
+                    season&rsquo;s figures say nothing about them. They are not
+                    a zero &mdash; there is simply nothing to project from.
+                    Judge these by eye.
+                  </p>
+                  <table>
+                    {noHistoryGroups.map((g) => (
+                      <tbody key={g.name}>
+                        <tr className="restock-product">
+                          <th colSpan={3} scope="colgroup">{g.name}</th>
+                        </tr>
+                        <tr className="restock-colheads">
+                          <th scope="col">Size</th>
+                          <th scope="col" className="num">On hand</th>
+                          <th scope="col" className="num">Available</th>
+                        </tr>
+                        {g.lines.map((l) => (
+                          <tr key={l.id}>
+                            <td>{l.size}</td>
+                            <td className="num">{l.available + l.shortfall}</td>
+                            <td className="num">{l.available}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    ))}
+                  </table>
+                </>
+              )}
+            </div>
           )}
         </div>
       )}

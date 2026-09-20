@@ -227,12 +227,22 @@ actually uses:
   it is displayed but never added. And an order counts toward demand
   once it is paid *or* handed over, so an abandoned payment link cannot
   inflate next season's buy.
-  Lines never linked to Wix show "No history" rather than 0 and stay
-  visible even when they suggest nothing, since zero there is an absence
-  of evidence. Note that `wix_product_id IS NULL` does not actually
-  prove a line never sold — `wix-sync`'s name+size fallback can match an
-  unlinked row, and Social Polo Shirt JNR14/JNR16 did exactly that — so
-  real sales always take precedence over the label.
+  "No history" is decided by **`stock_items.wix_listed_at`**, not by
+  whether a line is linked to Wix. A line listed after the window began
+  could not have sold during it. The old proxy (`wix_product_id IS
+  NULL`) collapsed twice over: `wix-sync`'s name+size fallback can match
+  an unlinked row, and a catalogue import linked 39 lines at once, which
+  made every one of them read as having sold nothing last season. Real
+  sales always take precedence over the label — a line that sold was
+  self-evidently on sale.
+  `wix_listed_at` is stamped by `wix-import` when it first links or
+  creates a line and **never changed after**, which
+  `check_stock_item_update` enforces rather than leaving to the route.
+  Re-stamping would make an old line look new and erase its history.
+  No-history lines with nothing to buy sit in a collapsed "New to the
+  shop" block below the order list; one with a shortfall stays in the
+  main list, because owed stock is a real obligation however new the
+  line is.
   `stock_items.created_at` is identical on every row (the date this
   repo's migrations first ran), so it cannot tell you when a line became
   sellable and must not be used for this.

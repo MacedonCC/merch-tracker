@@ -690,3 +690,15 @@ th.num, td.num { text-align: right; }
    data rows, and the product name above them keeps its own divider. */
 .restock-colheads th { padding-top: 0.45rem; padding-bottom: 0.45rem; }
 .restock-colheads:hover, .restock-product:hover { background: none; }
+
+/* Restock: "new to the shop" block. Collapsed by default because it is
+   context, not a shopping list — but never hidden, because a zero there
+   would read as "didn't sell" when the truth is "wasn't for sale". */
+.restock-newblock { margin-top: 20px; border-top: 1px solid var(--line); padding-top: 14px; }
+.restock-newblock-head {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  background: none; border: none; padding: 6px 0; cursor: pointer;
+  font: inherit; font-size: 0.9rem; font-weight: 600; color: var(--ink-soft);
+  text-align: left;
+}
+.restock-newblock-head:hover { color: var(--ink); }
