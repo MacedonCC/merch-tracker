@@ -45,6 +45,11 @@ interface WixProduct {
   id: string;
   name?: string;
   productType?: string;
+  /** Wix's "Manage pricing and inventory for each product variant"
+   *  toggle. When it is off, Wix stores no variant records for the
+   *  product, so `variants` comes back empty even with
+   *  includeVariants: true and there is no variant id to link to. */
+  manageVariants?: boolean;
   priceData?: { price?: number };
   productOptions?: Array<{ name?: string; choices?: Array<{ value?: string }> }>;
   variants?: WixVariant[];
@@ -169,6 +174,10 @@ export async function GET(req: NextRequest) {
   const byKey = new Map<string, StockRow>();
   for (const r of rows) byKey.set(nameSizeKey(r.name, r.size), r);
 
+  // Collected in dry-run mode only, to show why a product yielded no
+  // variant id rather than leaving it to guesswork.
+  const wixDiagnostics: Array<Record<string, unknown>> = [];
+
   const toLink: Array<Record<string, unknown>> = [];
   const toCreate: Array<Record<string, unknown>> = [];
   const unchanged: string[] = [];
@@ -192,7 +201,22 @@ export async function GET(req: NextRequest) {
       continue;
     }
 
-    for (const entry of catalogueEntries(p)) {
+    const entries = catalogueEntries(p);
+
+    if (dryRun && entries.some((e) => e.variantId === null) && wixDiagnostics.length < 4) {
+      wixDiagnostics.push({
+        product: productName,
+        manageVariants: p.manageVariants ?? '(field absent from response)',
+        sizeOptionsFound: (p.productOptions ?? []).map((o) => ({
+          option: o.name,
+          choices: (o.choices ?? []).map((c) => c.value),
+        })),
+        variantsReturned: (p.variants ?? []).length,
+        firstVariantRaw: (p.variants ?? [])[0] ?? null,
+      });
+    }
+
+    for (const entry of entries) {
       const key = nameSizeKey(entry.productName, entry.size);
 
       const owner = claimed.get(key);
@@ -287,6 +311,7 @@ export async function GET(req: NextRequest) {
     toCreate,
     unchanged,
     skippedAsFees: Array.from(new Set(skippedAsFees)),
+    ...(dryRun ? { wixDiagnostics } : {}),
     duplicateWixSizes,
     failed,
   });

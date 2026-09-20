@@ -80,15 +80,34 @@ const SIZE_ALIASES: Record<string, string> = {
   'one size fits all': 'one size',
 };
 
+// Drops everything that is not a letter or digit, so punctuation and
+// spacing cannot break a match. Wix calls it "Women's One Day Playing
+// Shirt" and the tracker calls it "Womens One Day Playing Shirt"; on an
+// exact comparison that apostrophe made the import treat five existing
+// lines as new, which would have stranded 19 units on rows no online
+// order could reach.
+//
+// This only ever makes matching MORE permissive, never less: two
+// strings that were equal before are still equal after, so no existing
+// match can be lost. What it could in principle do is make two
+// genuinely different products collide - checked against the live
+// catalogue, where no two stock lines share a squashed name + size.
+function squash(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
 export function normaliseSize(size: string): string {
+  // Aliases are looked up on the spaced form first: "one size fits all"
+  // has to reach its alias before the spaces are removed, or it would
+  // squash to "onesizefitsall" and miss.
   const key = tidyName(size).toLowerCase();
-  return SIZE_ALIASES[key] ?? key;
+  return squash(SIZE_ALIASES[key] ?? key);
 }
 
 // The key both Wix matchers use to line a catalogue entry up with a
 // stock_items row when there is no variant id to go on.
 export function nameSizeKey(name: string, size: string): string {
-  return `${tidyName(name).toLowerCase()}::${normaliseSize(size)}`;
+  return `${squash(name)}::${normaliseSize(size)}`;
 }
 
 export function money(n: number): string {

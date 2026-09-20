@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminSupabase } from '@/lib/supabase-server';
-import { tidyName, normaliseSize } from '@/lib/types';
+import { tidyName, nameSizeKey } from '@/lib/types';
 
 // This endpoint pulls the FULL order history from the Wix store and
 // records it. It pages through every order (no lookback window), so it
@@ -215,7 +215,7 @@ export async function GET(req: NextRequest) {
         byWixId.set(s.wix_product_id, s);
       }
     }
-    byName.set(`${s.name.toLowerCase()}::${normaliseSize(s.size)}`, s);
+    byName.set(nameSizeKey(s.name, s.size), s);
   }
 
   // ---- Build every row to insert in memory, no DB calls here ----
@@ -250,7 +250,7 @@ export async function GET(req: NextRequest) {
       const match =
         byWixId.get(`${productId}::${variantId}`) ??
         byWixId.get(productId) ??
-        byName.get(`${productName.toLowerCase()}::${normaliseSize(size)}`) ??
+        byName.get(nameSizeKey(productName, size)) ??
         null;
 
       if (!match) {
