@@ -197,10 +197,25 @@ scheduled route; `wix-import` and `wix-media` are run by hand.
 The daily Wix availability push piggybacks on the end of that same
 run (see `lib/wix-push.ts`), so it inherits the same time and, more
 importantly, the same ordering: the day's orders are imported before
-anything is pushed. `wix-inventory` is **retired** and answers
-  410 — the tracker is the source of truth for stock, Wix inventory
-  tracking is off for almost the whole catalogue, and
-  `check_stock_item_update` refused its writes anyway.
+anything is pushed. **Import-then-push is a rule for every caller, not
+a property of the cron.** `available` is `on_hand - committed` and
+`committed` only counts orders we already hold, so between a Wix sale
+and the import our `available` is stale-*high*; pushing in that window
+raises Wix's count and re-offers a garment that has just been bought.
+That is why the import lives in `lib/wix-sync-run.ts` (`runWixSync()`)
+rather than inside the route: `app/api/wix-sync` (the cron) and the
+POST half of `app/api/wix-push` (the "Push to Wix now" button on the
+Stock page, which an admin can press at any hour) both call it
+immediately before pushing. The button's GET preview does not import —
+it stays a pure read — so its figures can read slightly high, which the
+confirm dialog states and the result message corrects by reporting what
+the import actually brought in. A failed import aborts the push rather
+than pushing on figures known to be stale.
+
+`wix-inventory` is **retired** and answers 410 — the tracker is the
+source of truth for stock, Wix inventory tracking is off for almost the
+whole catalogue, and `check_stock_item_update` refused its writes
+anyway.
 
 **`middleware.ts` excludes all of `api/` from the matcher, and must keep
 doing so.** Middleware redirects an unauthenticated request to `/login`,
@@ -350,7 +365,11 @@ with `wix-sync`'s fallback so the two cannot drift. A size that imports
 under one spelling and syncs under another would create a line that
 silently never receives orders.
 
-### Wix sync (`app/api/wix-sync/route.ts`)
+### Wix sync (`lib/wix-sync-run.ts`, routed by `app/api/wix-sync/route.ts`)
+
+The route is a thin wrapper: authenticate on `CRON_SECRET`, call
+`runWixSync()`, then push. All the import logic is in the lib, which
+never pushes — see the ordering rule under Route protection patterns.
 
 Pulls the full paid-order history from Wix (no lookback window, so it's
 always safe to re-run to catch up on anything missed). Matching a Wix line

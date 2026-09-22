@@ -584,6 +584,12 @@ export default function TrackerSection({
   // spoken-for sizes off sale. Reports first, then asks: this changes
   // the public shop, so it should not happen on a single stray tap.
   //
+  // The POST imports the day's Wix orders before it pushes anything,
+  // the same order as the evening cron — otherwise a midday push
+  // would hand back stock already sold online. That means the preview
+  // below is taken BEFORE the import and can read a little high, which
+  // the confirm text says outright rather than quietly.
+  //
   // EVERY outcome ends in a visible message, including cancelling and
   // including a push that changed nothing. The first version returned
   // silently when the confirm was dismissed, which made 'I cancelled'
@@ -605,9 +611,12 @@ export default function TrackerSection({
         `${c.wouldBlock} go to zero (blocked online)\n` +
         `${c.wouldChange} would actually change\n` +
         (c.skipped ? `${c.skipped} skipped — no Wix link\n` : '') +
+        '\nToday\u2019s Wix orders are imported first, so the final ' +
+        'numbers may come out lower than this.' +
         (preview.pushEnabled
           ? ''
-          : '\nWIX_PUSH_ENABLED is off, so nothing will be sent.');
+          : '\n\nWIX_PUSH_ENABLED is off, so the orders will be imported '
+            + 'but nothing will be sent to Wix.');
       if (!window.confirm(summary)) {
         setPushSummary('Push cancelled — nothing was sent to Wix.');
         return;
@@ -615,12 +624,20 @@ export default function TrackerSection({
 
       const result = await fetch('/api/wix-push', { method: 'POST' }).then((r) => r.json());
       const rc = result.counts;
+      // What the import brought in is reported whether or not it was
+      // anything: 'no new orders' and 'the import never ran' must not
+      // look the same, same reasoning as the cancel message above.
+      const imported = result.sync?.imported ?? 0;
+      const importedNote = imported
+        ? `Imported ${imported} new Wix order line${imported === 1 ? '' : 's'} first. `
+        : 'No new Wix orders to import. ';
       setPushSummary(
         result.error
           ? `Push failed: ${result.error}`
           : !result.wrote
-            ? result.reason
-            : `${result.reason} ${rc.wouldBlock} blocked, ${rc.newlyTracked} newly tracked` +
+            ? importedNote + result.reason
+            : importedNote +
+              `${result.reason} ${rc.wouldBlock} blocked, ${rc.newlyTracked} newly tracked` +
               (rc.failed ? `, ${rc.failed} FAILED.` : '.')
       );
       load();
