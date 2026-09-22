@@ -3,6 +3,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createClient } from '@/lib/supabase-client';
 import { sizeRank } from '@/lib/types';
+import { projectRestock } from '@/lib/restock';
 import type { MemberPermissions } from '@/lib/member';
 
 // The nearest ancestor that would clip an overflowing child (the
@@ -124,109 +125,6 @@ interface OrderRow {
 
 const money = (n: number) =>
   new Intl.NumberFormat('en-AU', { style: 'currency', currency: 'AUD' }).format(n);
-
-// ---- Restock: demand from last season's sales -----------------------
-// The season runs 1 Aug to 28 Feb. Restock projects this season's needs
-// from the SAME window last season, which is the only like-for-like
-// comparison available — a cricket club's sales are violently seasonal,
-// so comparing against a trailing 12 months or a rolling 90 days would
-// read August's spike as growth and April's silence as collapse.
-//
-// Dates come from orders.ordered_at (when it was placed), not
-// created_at (when the row was imported — the historical Wix backfill
-// would stack years of orders onto one afternoon) and not
-// distributed_at (when it was collected, which is fulfilment, not
-// demand).
-//
-// Bounds are half-open. An inclusive `<= 28 Feb` would resolve to
-// midnight at the START of the 28th and silently drop that whole day.
-//
-// The window is pinned to Australia/Melbourne rather than the device's
-// timezone, so a committee member checking the list from overseas sees
-// the same season as everyone at the club. That matters at both ends:
-// the boundaries themselves, and which season we are in at all — a
-// laptop set to UTC on 1 August is still 31 July there while it is
-// already August at the ground.
-//
-// The zone's offset is read from Intl rather than hardcoded, because it
-// is not constant across the window: Melbourne is UTC+10 (AEST) on
-// 1 August but UTC+11 (AEDT) on 1 March, so a single fixed offset would
-// put one end of the window an hour out.
-const CLUB_TZ = 'Australia/Melbourne';
-
-// Milliseconds to add to a UTC instant to get the club's wall clock.
-function clubOffsetMs(utcMs: number): number {
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: CLUB_TZ,
-    hour12: false,
-    year: 'numeric', month: '2-digit', day: '2-digit',
-    hour: '2-digit', minute: '2-digit', second: '2-digit',
-  }).formatToParts(new Date(utcMs));
-  const at = (type: string) => Number(parts.find((p) => p.type === type)?.value ?? 0);
-  // Some engines report midnight as hour 24 under hour12: false.
-  const hour = at('hour') === 24 ? 0 : at('hour');
-  const asIfUtc = Date.UTC(at('year'), at('month') - 1, at('day'), hour, at('minute'), at('second'));
-  return asIfUtc - utcMs;
-}
-
-// The instant at which the club's wall clock reads this local midnight.
-function clubMidnight(year: number, monthIndex: number, day: number): Date {
-  const naive = Date.UTC(year, monthIndex, day);
-  // Subtracting the offset at the naive instant lands very close; a
-  // second pass corrects the rare case where that first guess falls on
-  // the far side of a DST transition.
-  const first = naive - clubOffsetMs(naive);
-  const second = naive - clubOffsetMs(first);
-  return new Date(second);
-}
-
-// Always the most recently COMPLETED Aug-Feb season, never one still
-// running — a half-finished season would under-project every line,
-// badly in September and catastrophically in August.
-//
-// Which year that season started depends on where we are in the club's
-// calendar, judged on the club's clock rather than the device's:
-//
-//   Jan, Feb   the season that began last August is still running, so
-//              the last completed one began the August before that
-//   Mar - Jul  the season that began last August finished in February,
-//              so it is the most recent completed one
-//   Aug - Dec  a new season has begun and is running, so the most
-//              recent completed one began last August
-//
-// Mar-Jul and Aug-Dec therefore land on the same answer, and only
-// Jan-Feb reaches back an extra year. Getting this wrong is quiet: the
-// page still renders a plausible list, just built from the wrong year.
-function lastSeasonWindow(now = new Date()): { start: Date; end: Date; label: string } {
-  const clubNow = new Date(now.getTime() + clubOffsetMs(now.getTime()));
-  const clubYear = clubNow.getUTCFullYear();
-  const clubMonth = clubNow.getUTCMonth();
-  const seasonStartYear = clubMonth <= 1 ? clubYear - 2 : clubYear - 1;
-
-  return {
-    start: clubMidnight(seasonStartYear, 7, 1),
-    end: clubMidnight(seasonStartYear + 1, 2, 1),
-    label: `1 Aug ${seasonStartYear} – 28 Feb ${seasonStartYear + 1}`,
-  };
-}
-
-interface RestockLine {
-  id: string;
-  size: string;
-  price: number;
-  available: number;
-  shortfall: number;
-  /** null when the line could not have sold in the window at all. */
-  demand: number | null;
-  suggested: number;
-}
-
-interface RestockGroup {
-  name: string;
-  lines: RestockLine[];
-  units: number;
-  value: number;
-}
 
 const formatDate = (iso: string) => new Date(iso).toLocaleDateString('en-AU');
 
@@ -736,104 +634,20 @@ export default function TrackerSection({
   );
 
   // Restock is projected from last season's sales, NOT target_level.
-  // target_level is left in place on stock_items and still drives
-  // stock_overview.suggested_order; this page simply stops reading it.
-  const season = useMemo(() => lastSeasonWindow(), []);
+  // The projection itself lives in lib/restock.ts so the home page's
+  // "lines to reorder" tile can give the same answer; it used to read
+  // stock_overview.suggested_order and disagree.
+  const restock = useMemo(
+    () => projectRestock({ stock, orders, listedAt, retired }),
+    [stock, orders, listedAt, retired]
+  );
+  const season = restock.season;
 
-  const restockGroups = useMemo<RestockGroup[]>(() => {
-    // Demand = units ordered in the window, counting an order once it
-    // is either paid or handed over. An order that is neither is an
-    // abandoned payment link, and counting it would let someone inflate
-    // next season's buy by starting checkouts they never finish.
-    const demandById = new Map<string, number>();
-    for (const o of orders) {
-      if (!o.stock_item_id) continue;
-      if (o.payment_status !== 'paid' && !o.distributed_at) continue;
-      const placed = new Date(o.ordered_at);
-      if (placed < season.start || placed >= season.end) continue;
-      demandById.set(o.stock_item_id, (demandById.get(o.stock_item_id) ?? 0) + o.quantity);
-    }
-
-    const byName = new Map<string, RestockGroup>();
-    for (const s of stock) {
-      // A retired line is finished: it may have sold last season and
-      // may even be owed on, but the club no longer buys it, so it has
-      // no place on a list of what to order. Its stock, orders and
-      // history stay exactly as they are.
-      if (retired.has(s.id)) continue;
-      // "No history" means the line COULD NOT have sold in the window,
-      // which is a question about when it went on sale, not whether it
-      // is linked today. wix_listed_at answers it directly; the old
-      // proxy ("is it linked to Wix?") broke the moment a catalogue
-      // import linked 39 lines at once, making every one of them read
-      // as having sold nothing last season.
-      //
-      // Real sales always win. If a line sold in the window it self
-      // evidently was on sale, whatever its recorded listing date says.
-      const sold = demandById.get(s.id);
-      const listed = listedAt.get(s.id);
-      const onSaleBeforeSeason = listed ? new Date(listed) < season.start : false;
-      const demand = sold ?? (onSaleBeforeSeason ? 0 : null);
-
-      // shortfall is shown but NOT added to the suggestion: it equals
-      // -available whenever stock is oversold, so adding both would
-      // count the oversold units twice.
-      const suggested = Math.max(0, Math.ceil((demand ?? 0) - s.available));
-
-      // A line with known demand and nothing to buy is simply not on
-      // the shopping list. A "No history" line with nothing to buy is
-      // not either, but it is not hidden: it moves to the collapsed
-      // "new to the shop" block below, so an absence of evidence is
-      // never silently rendered as a zero.
-      //
-      // A "No history" line WITH something to buy stays in the main
-      // list, because that quantity comes from a shortfall - paid
-      // orders the cupboard cannot fill - which is a real obligation
-      // regardless of how new the line is.
-      if (suggested === 0 && demand !== null) continue;
-
-      const line: RestockLine = {
-        id: s.id,
-        size: s.size,
-        price: s.price,
-        available: s.available,
-        shortfall: s.shortfall,
-        demand,
-        suggested,
-      };
-      const group = byName.get(s.name);
-      if (group) group.lines.push(line);
-      else byName.set(s.name, { name: s.name, lines: [line], units: 0, value: 0 });
-    }
-
-    return Array.from(byName.values())
-      .map((g) => {
-        g.lines.sort((a, b) => sizeRank(a.size) - sizeRank(b.size));
-        g.units = g.lines.reduce((n, l) => n + l.suggested, 0);
-        g.value = g.lines.reduce((n, l) => n + l.suggested * l.price, 0);
-        return g;
-      })
-      .sort((a, b) => a.name.localeCompare(b.name));
-  }, [stock, orders, season, listedAt, retired]);
-
-  // Split: anything to buy goes in the main list; the rest is new stock
-  // with no sales history to judge it by.
-  const restockOrder = restockGroups
-    .map((g) => ({ ...g, lines: g.lines.filter((l) => l.suggested > 0) }))
-    .filter((g) => g.lines.length > 0)
-    .map((g) => ({
-      ...g,
-      units: g.lines.reduce((n, l) => n + l.suggested, 0),
-      value: g.lines.reduce((n, l) => n + l.suggested * l.price, 0),
-    }));
-
-  const noHistoryGroups = restockGroups
-    .map((g) => ({ ...g, lines: g.lines.filter((l) => l.suggested === 0 && l.demand === null) }))
-    .filter((g) => g.lines.length > 0);
-  const noHistoryCount = noHistoryGroups.reduce((n, g) => n + g.lines.length, 0);
-
-  const restockUnits = restockOrder.reduce((n, g) => n + g.units, 0);
-  const restockValue = restockOrder.reduce((n, g) => n + g.value, 0);
+  const restockOrder = restock.order;
+  const noHistoryGroups = restock.noHistory;
+  const noHistoryCount = restock.noHistoryCount;
+  const restockUnits = restock.units;
+  const restockValue = restock.value;
 
   // Counted over liveStock so the summary and the grid below it can
   // never disagree: a figure the grid has no row to explain reads as a

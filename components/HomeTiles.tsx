@@ -4,6 +4,11 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { createClient } from '@/lib/supabase-client';
+import {
+  projectRestock,
+  type RestockOrderRow,
+  type RestockStockRow,
+} from '@/lib/restock';
 
 interface Counts {
   onHand: number;
@@ -32,18 +37,22 @@ export default function HomeTiles() {
   useEffect(() => {
     (async () => {
       const supabase = createClient();
-      // retired_at is on stock_items, not on the stock_overview view,
-      // so retired lines are read separately and dropped. Without this
-      // the home tile counts stock the Stock page no longer shows, and
-      // two screens disagree about the size of the cupboard.
+      // retired_at and wix_listed_at are on stock_items, not on the
+      // stock_overview view, so they are read separately and merged by
+      // id - the same shape the Stock page uses.
       const [{ data: stock }, { data: orders }, { data: meta }] = await Promise.all([
-        supabase.from('stock_overview').select('id, on_hand, suggested_order'),
-        supabase.from('orders').select('quantity, payment_status, distributed_at, stock_item_id'),
-        supabase.from('stock_items').select('id, retired_at'),
+        supabase.from('stock_overview').select('id, name, size, price, on_hand, available, shortfall'),
+        supabase
+          .from('orders')
+          .select('quantity, payment_status, distributed_at, stock_item_id, ordered_at'),
+        supabase.from('stock_items').select('id, retired_at, wix_listed_at'),
       ]);
 
       const retired = new Set(
         (meta ?? []).filter((m) => m.retired_at).map((m) => m.id as string)
+      );
+      const listedAt = new Map(
+        (meta ?? []).map((m) => [m.id as string, (m.wix_listed_at as string | null) ?? null])
       );
       const live = (stock ?? []).filter((s) => !retired.has(s.id as string));
 
@@ -58,10 +67,22 @@ export default function HomeTiles() {
         return onHand !== undefined && onHand >= o.quantity;
       }).length;
 
+      // The same projection the /restock page runs, so the tile and the
+      // page can never disagree. stock_overview.suggested_order is the
+      // old target-level figure and still counts retired lines; reading
+      // it here had the home page proposing five junior shirt sizes the
+      // club no longer sells.
+      const projection = projectRestock({
+        stock: (stock ?? []) as unknown as RestockStockRow[],
+        orders: (orders ?? []) as unknown as RestockOrderRow[],
+        listedAt,
+        retired,
+      });
+
       setCounts({
         onHand: live.reduce((n, s) => n + (s.on_hand as number), 0),
         readyToHandOver,
-        linesToReorder: live.filter((s) => (s.suggested_order as number) > 0).length,
+        linesToReorder: projection.linesToOrder,
       });
       setLoading(false);
     })();

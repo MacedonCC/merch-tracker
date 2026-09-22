@@ -170,10 +170,12 @@ the same order twice, so re-running it is always safe.
 
 Straight after importing, the same run pushes each size's availability back to
 Wix, so a garment that is sold out or already spoken for cannot be bought
-online. That push only happens when `WIX_PUSH_ENABLED` is set to `true`; leave
-it unset and the sync behaves exactly as it always did. Admins can also push on
-demand with **Push to Wix now** on the Stock page, which shows what it will
-change and asks before sending. Every push is recorded in `wix_stock_pushes`.
+online. **This is on in production** — `WIX_PUSH_ENABLED` is `true`, and the
+tracker is what decides what the shop will sell. Setting the variable to
+anything else turns the push off and the sync behaves as it did before it
+existed. Admins can also push on demand with **Push to Wix now** on the Stock
+page, which imports the day's Wix orders first, shows what it will change and
+asks before sending. Every push is recorded in `wix_stock_pushes`.
 
 ---
 

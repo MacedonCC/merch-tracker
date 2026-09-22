@@ -197,7 +197,12 @@ scheduled route; `wix-import` and `wix-media` are run by hand.
 The daily Wix availability push piggybacks on the end of that same
 run (see `lib/wix-push.ts`), so it inherits the same time and, more
 importantly, the same ordering: the day's orders are imported before
-anything is pushed. **Import-then-push is a rule for every caller, not
+anything is pushed. **`WIX_PUSH_ENABLED` is `true` in production** as
+of 22 Sep 2026 — the first real push set 103 sizes — so the tracker
+now decides what the Wix shop will sell. Earlier notes describing the
+push as off are stale. Everything below about ordering stopped being
+theoretical the moment that flag went on: a push on stale figures now
+really does re-offer sold gear. **Import-then-push is a rule for every caller, not
 a property of the cron.** `available` is `on_hand - committed` and
 `committed` only counts orders we already hold, so between a Wix sale
 and the import our `available` is stale-*high*; pushing in that window
@@ -263,13 +268,23 @@ actually uses:
 - `suggested_order` — non-zero only once `available` drops to
   `low_stock_alert` or stock is oversold, topping back up to `target_level`.
   Items with `target_level = 0` never suggest an order.
-  **The `/restock` page no longer reads this field.** It projects demand
+  **Nothing in the app reads this field any more.** `/restock` stopped
+  first; the home page's "lines to reorder" tile was the last reader
+  and now runs the same projection, via `projectRestock()` in
+  `lib/restock.ts`. The two screens used to disagree badly — the tile
+  said 59 lines where `/restock` said 30, because the column knows
+  nothing about sales and nothing about `retired_at`. Any new caller
+  wanting "what should we buy" must use `lib/restock.ts`, not this
+  column. It projects demand
   from sales in the most recently **completed** Aug–Feb season (never
   one still running, which would under-project every line), with
   midnight pinned to Australia/Melbourne regardless of device timezone
   and a half-open upper bound so 28 Feb isn't dropped. It suggests
-  `max(0, demand − available)`. `target_level` and this column both stay
-  in place for the Stock page; restock simply stopped using them.
+  `max(0, demand − available)`. The column and `target_level` are both
+  still in the schema, and the Adjust modal still edits `target_level`,
+  but nothing consumes either one — `target_level`'s only output is
+  this column. `low_stock_alert` is different and still load-bearing:
+  it decides `stock_status`, which colours the Stock grid.
   Two traps in that formula: `shortfall` equals `−available` whenever
   stock is oversold, so adding both double-counts the oversold units —
   it is displayed but never added. And an order counts toward demand
@@ -302,6 +317,12 @@ actually uses:
   `stock_items.created_at` is identical on every row (the date this
   repo's migrations first ran), so it cannot tell you when a line became
   sellable and must not be used for this.
+
+  The projection lives in **`lib/restock.ts`** (`projectRestock()`),
+  not in the page, because the home page's "lines to reorder" tile
+  needs the same answer. Both callers pass their own already-loaded
+  rows in rather than the module querying for itself, so two views of
+  the same data are never one request apart.
 
   **A retired line is hidden from every screen that offers or totals
   stock, and kept everywhere that records it.** Hidden: the Stock
