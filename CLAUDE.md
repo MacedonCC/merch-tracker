@@ -365,6 +365,26 @@ with `wix-sync`'s fallback so the two cannot drift. A size that imports
 under one spelling and syncs under another would create a line that
 silently never receives orders.
 
+The report also carries **`wixStock`**: every Wix catalogue size with
+the quantity Wix holds for it (from a second read, the same
+`/stores/v2/inventoryItems/query` that `lib/wix-push.ts` uses),
+alongside the tracker's own `on_hand`. It is built in its own
+read-only pass rather than through `findRow()`, which consumes a row
+as it matches — a report must not change what the import then does.
+Because of that it covers products the tracker has **no line for yet**,
+which is the point: a brand new Wix product cannot be looked up any
+other way until a line exists for it, and those rows come back with
+`trackerLine: null`.
+
+`wixQuantity: null` with `wixTracked: false` means Wix is not counting
+that product at all, which is not the same as zero. A failed inventory
+read sets `wixStockError` and leaves the quantities null rather than
+failing the import — linking and prices are the job, quantities are
+commentary. **Nothing reads `wixStock` back.** It is a report, not a
+stock feed; migration `20260920000007` would refuse a quantity write
+from this route regardless. Making a Wix count into the tracker's
+count is a deliberate act with a `stock_movements` row behind it.
+
 ### Wix sync (`lib/wix-sync-run.ts`, routed by `app/api/wix-sync/route.ts`)
 
 The route is a thin wrapper: authenticate on `CRON_SECRET`, call

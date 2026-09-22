@@ -31,6 +31,17 @@ import { nameSizeKey, tidyName } from '@/lib/types';
 //
 // DRY RUN: ?dryRun=1 performs every read and every comparison, writes
 // nothing, and returns the exact same report. Run it first.
+//
+// WIX QUANTITIES are reported but never acted on. `wixStock` lists
+// every catalogue size with what Wix believes it holds, next to the
+// tracker's own on_hand, and it covers products the tracker has no
+// line for yet — which is the whole point: a brand new Wix product
+// cannot be looked up any other way until a line exists for it. This
+// is a report, not a stock feed. Nothing reads it back, and the
+// database would refuse a quantity write from this route anyway
+// (migration 20260920000007). If a Wix count is ever to become the
+// tracker's count, that is a deliberate human act with a
+// stock_movements row behind it, not a side effect of an import.
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -58,6 +69,17 @@ interface WixProduct {
   priceData?: { price?: number };
   productOptions?: Array<{ name?: string; choices?: Array<{ value?: string }> }>;
   variants?: WixVariant[];
+}
+
+/** A product's inventory record. Wix keeps stock in a different API
+ *  from the catalogue, so reading it is a second request. */
+interface WixInventoryItem {
+  id?: string;
+  productId?: string;
+  /** False when Wix is not counting this product at all, in which case
+   *  its quantities are meaningless rather than zero. */
+  trackQuantity?: boolean;
+  variants?: Array<{ variantId?: string; quantity?: number; inStock?: boolean }>;
 }
 
 interface StockRow {
@@ -227,6 +249,52 @@ export async function GET(req: NextRequest) {
     });
   }
 
+  // Wix stock, read from the inventory API - the same call
+  // lib/wix-push.ts makes. A failure here must not fail the import:
+  // linking and prices are the job, quantities are commentary, so the
+  // report says the read failed and carries on with nulls.
+  const invByProduct = new Map<string, WixInventoryItem>();
+  let wixStockError: string | null = null;
+  let wixStockTruncated = false;
+  {
+    const invRes = await fetch('https://www.wixapis.com/stores/v2/inventoryItems/query', {
+      method: 'POST',
+      headers: {
+        Authorization: process.env.WIX_API_KEY,
+        'wix-site-id': process.env.WIX_SITE_ID,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ query: { paging: { limit: 100 } } }),
+      cache: 'no-store',
+    });
+    if (!invRes.ok) {
+      wixStockError = `Wix inventory returned ${invRes.status}`;
+    } else {
+      const invData = await invRes.json();
+      const items: WixInventoryItem[] = invData.inventoryItems ?? [];
+      // One page only, matching the catalogue read above. Said out loud
+      // rather than left for someone to discover as missing rows.
+      wixStockTruncated = items.length >= 100;
+      for (const i of items) if (i.productId) invByProduct.set(i.productId, i);
+    }
+  }
+
+  // Wix's id for "this product has no variants".
+  const NO_VARIANT = '00000000-0000-0000-0000-000000000000';
+
+  function wixStockFor(productId: string, variantId: string | null) {
+    const item = invByProduct.get(productId);
+    if (!item) return { wixQuantity: null, wixTracked: null };
+    const v = (item.variants ?? []).find((x) => x.variantId === (variantId ?? NO_VARIANT));
+    return {
+      // A tracked product with no matching variant row reads as null,
+      // not 0: "Wix did not tell us" and "Wix says none left" are
+      // different answers and only one of them is a count.
+      wixQuantity: typeof v?.quantity === 'number' ? v.quantity : null,
+      wixTracked: item.trackQuantity ?? null,
+    };
+  }
+
   const supabase = createAdminSupabase();
   const { data: stock } = await supabase
     .from('stock_items')
@@ -302,6 +370,34 @@ export async function GET(req: NextRequest) {
         matchesAnyway: nameSizeKey(r.name, '') === nameSizeKey(wixName, '')
           ? 'yes - differs only by punctuation'
           : 'NO - name fallback will not match this product',
+      });
+    }
+  }
+
+  // Every Wix catalogue size with what Wix thinks it holds, beside the
+  // tracker's own figure. Built in its own read-only pass, deliberately
+  // NOT through findRow(): that function consumes a row as it matches,
+  // and a report must not change what the import then does. It looks
+  // rows up directly instead, so a size can appear here with
+  // trackerLine null - exactly the case a new Wix product is in, and
+  // the reason this exists.
+  const wixStock: Array<Record<string, unknown>> = [];
+  for (const p of products) {
+    const productName = tidyName(p.name ?? '');
+    if (!productName || looksLikeAFee(productName)) continue;
+    for (const e of catalogueEntries(p)) {
+      const tracker =
+        (e.variantId ? byVariant.get(`${e.productId}::${e.variantId}`) : undefined) ??
+        byKey.get(nameSizeKey(e.productName, e.size)) ??
+        null;
+      wixStock.push({
+        product: e.productName,
+        size: e.size,
+        ...wixStockFor(e.productId, e.variantId),
+        trackerLine: tracker ? `${tracker.name} / ${tracker.size}` : null,
+        trackerOnHand: tracker ? tracker.quantity : null,
+        productId: e.productId,
+        variantId: e.variantId,
       });
     }
   }
@@ -398,7 +494,11 @@ export async function GET(req: NextRequest) {
           name: entry.productName,
           size: entry.size,
           price: entry.price,
+          // Created at zero whatever Wix says it holds - see the
+          // header. The Wix figure rides along so the person reading
+          // the report can see what they would be signing up to.
           on_hand: 0,
+          ...wixStockFor(entry.productId, entry.variantId),
           wix_product_id: entry.productId,
           wix_variant_id: entry.variantId,
         });
@@ -438,6 +538,7 @@ export async function GET(req: NextRequest) {
         name: existing.name,
         size: existing.size,
         on_hand: existing.quantity,
+        ...wixStockFor(entry.productId, entry.variantId),
         ...(patch.wix_product_id !== undefined
           ? { wix_product_id: `${existing.wix_product_id ?? '(none)'} -> ${entry.productId}` }
           : {}),
@@ -482,6 +583,8 @@ export async function GET(req: NextRequest) {
       conflicts: conflicts.length,
       staleVariantIds: staleVariantIds.length,
       nameDrift: nameDrift.length,
+      wixStockLines: wixStock.length,
+      wixStockUnlinked: wixStock.filter((w) => w.trackerLine === null).length,
       failed: failed.length,
     },
     toLink,
@@ -493,6 +596,9 @@ export async function GET(req: NextRequest) {
     conflicts,
     staleVariantIds,
     nameDrift,
+    wixStock,
+    ...(wixStockError ? { wixStockError } : {}),
+    ...(wixStockTruncated ? { wixStockTruncated: 'Wix returned a full page of inventory items; some may be missing.' } : {}),
     failed,
   });
 }
