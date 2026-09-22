@@ -96,10 +96,8 @@ interface StockRow {
   price: number;
   on_hand: number;
   low_stock_alert: number;
-  target_level: number;
   committed: number;
   available: number;
-  suggested_order: number;
   shortfall: number;
   stock_status: 'ok' | 'low' | 'out' | 'oversold';
   wix_product_id: string | null;
@@ -406,7 +404,6 @@ export default function TrackerSection({
       price: Number(f.get('price')) || 0,
       quantity: Number(f.get('quantity')) || 0,
       low_stock_alert: Number(f.get('alert')) || 3,
-      target_level: Number(f.get('target')) || 0,
     });
     if (error) return flash(error.message);
     setModal(null);
@@ -424,7 +421,6 @@ export default function TrackerSection({
     const newQty = permissions.can_adjust_stock ? Number(f.get('quantity')) || 0 : editing.on_hand;
     const newPrice = permissions.can_change_prices ? Number(f.get('price')) || 0 : editing.price;
     const newAlert = permissions.can_change_targets ? Number(f.get('alert')) || 0 : editing.low_stock_alert;
-    const newTarget = permissions.can_change_targets ? Number(f.get('target')) || 0 : editing.target_level;
     const diff = newQty - editing.on_hand;
 
     const { error } = await supabase
@@ -433,7 +429,6 @@ export default function TrackerSection({
         quantity: newQty,
         price: newPrice,
         low_stock_alert: newAlert,
-        target_level: newTarget,
         updated_at: new Date().toISOString(),
       })
       .eq('id', editing.id);
@@ -1181,10 +1176,7 @@ export default function TrackerSection({
               <div className="field"><label>Price (AUD)</label><input name="price" type="number" step="0.01" min="0" defaultValue="0" onWheel={(e) => e.currentTarget.blur()} /></div>
               <div className="field"><label>On hand now</label><input name="quantity" type="number" min="0" defaultValue="0" onWheel={(e) => e.currentTarget.blur()} /></div>
             </div>
-            <div className="field-pair">
-              <div className="field"><label>Warn when available drops to</label><input name="alert" type="number" min="0" defaultValue="3" onWheel={(e) => e.currentTarget.blur()} /></div>
-              <div className="field"><label>Target to hold</label><input name="target" type="number" min="0" defaultValue="5" onWheel={(e) => e.currentTarget.blur()} /></div>
-            </div>
+            <div className="field"><label>Warn when available drops to</label><input name="alert" type="number" min="0" defaultValue="3" onWheel={(e) => e.currentTarget.blur()} /></div>
             <div className="modal-actions">
               <button type="button" onClick={() => setModal(null)}>Cancel</button>
               <button type="submit" className="btn-solid">Add item</button>
@@ -1204,12 +1196,8 @@ export default function TrackerSection({
               <input name="quantity" type="number" min="0" defaultValue={editing.on_hand} autoFocus disabled={!permissions.can_adjust_stock} onWheel={(e) => e.currentTarget.blur()} /></div>
             <div className="field"><label>Price (AUD)</label>
               <input name="price" type="number" step="0.01" min="0" defaultValue={editing.price} disabled={!permissions.can_change_prices} onWheel={(e) => e.currentTarget.blur()} /></div>
-            <div className="field-pair">
-              <div className="field"><label>Warn when available drops to</label>
-                <input name="alert" type="number" min="0" defaultValue={editing.low_stock_alert} disabled={!permissions.can_change_targets} onWheel={(e) => e.currentTarget.blur()} /></div>
-              <div className="field"><label>Target to hold</label>
-                <input name="target" type="number" min="0" defaultValue={editing.target_level} disabled={!permissions.can_change_targets} onWheel={(e) => e.currentTarget.blur()} /></div>
-            </div>
+            <div className="field"><label>Warn when available drops to</label>
+              <input name="alert" type="number" min="0" defaultValue={editing.low_stock_alert} disabled={!permissions.can_change_targets} onWheel={(e) => e.currentTarget.blur()} /></div>
             <div className="modal-actions">
               <button type="button" onClick={() => setModal(null)}>Cancel</button>
               <button type="submit" className="btn-solid">Save</button>

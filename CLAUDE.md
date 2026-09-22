@@ -265,99 +265,106 @@ actually uses:
 - `on_hand` — raw quantity.
 - `committed` — sum of paid-but-not-yet-handed-over order quantities.
 - `available` — `on_hand - committed`.
-- `suggested_order` — non-zero only once `available` drops to
-  `low_stock_alert` or stock is oversold, topping back up to `target_level`.
-  Items with `target_level = 0` never suggest an order.
-  **Nothing in the app reads this field any more.** `/restock` stopped
-  first; the home page's "lines to reorder" tile was the last reader
-  and now runs the same projection, via `projectRestock()` in
-  `lib/restock.ts`. The two screens used to disagree badly — the tile
-  said 59 lines where `/restock` said 30, because the column knows
-  nothing about sales and nothing about `retired_at`. Any new caller
-  wanting "what should we buy" must use `lib/restock.ts`, not this
-  column. It projects demand
-  from sales in the most recently **completed** Aug–Feb season (never
-  one still running, which would under-project every line), with
-  midnight pinned to Australia/Melbourne regardless of device timezone
-  and a half-open upper bound so 28 Feb isn't dropped. It suggests
-  `max(0, demand − available)`. The column and `target_level` are both
-  still in the schema, and the Adjust modal still edits `target_level`,
-  but nothing consumes either one — `target_level`'s only output is
-  this column. `low_stock_alert` is different and still load-bearing:
-  it decides `stock_status`, which colours the Stock grid.
-  Two traps in that formula: `shortfall` equals `−available` whenever
-  stock is oversold, so adding both double-counts the oversold units —
-  it is displayed but never added. And an order counts toward demand
-  once it is paid *or* handed over, so an abandoned payment link cannot
-  inflate next season's buy.
-  "No history" is decided by **`stock_items.wix_listed_at`**, not by
-  whether a line is linked to Wix. A line listed after the window began
-  could not have sold during it. The old proxy (`wix_product_id IS
-  NULL`) collapsed twice over: `wix-sync`'s name+size fallback can match
-  an unlinked row, and a catalogue import linked 39 lines at once, which
-  made every one of them read as having sold nothing last season. Real
-  sales always take precedence over the label — a line that sold was
-  self-evidently on sale.
-  `wix_listed_at` is stamped by `wix-import` when it first links or
-  creates a line and **never changed after**, which
-  `check_stock_item_update` enforces rather than leaving to the route.
-  Re-stamping would make an old line look new and erase its history.
-  No-history lines with nothing to buy sit in a collapsed "New to the
-  shop" block below the order list; one with a shortfall stays in the
-  main list, because owed stock is a real obligation however new the
-  line is.
-  **Lines with `stock_items.retired_at` set are skipped entirely.** The
-  retired pre-2026 pants line still had 2 units of demand in last
-  season's window and was duly suggesting the club buy two more of a
-  product it no longer sells. Retirement could not be inferred from the
-  absence of a Wix link — an unlinked line may simply never have been
-  in the online shop while still being sold at the ground — so it is an
-  explicit column, admin-only, and never settable by a catalogue
-  import. Stock, orders and history on a retired line are untouched.
-  `stock_items.created_at` is identical on every row (the date this
-  repo's migrations first ran), so it cannot tell you when a line became
-  sellable and must not be used for this.
+- `stock_status` — `ok | low | out | oversold`, derived from
+  `low_stock_alert`. This colours the Stock grid, and is the only
+  thing `low_stock_alert` still feeds.
 
-  The projection lives in **`lib/restock.ts`** (`projectRestock()`),
-  not in the page, because the home page's "lines to reorder" tile
-  needs the same answer. Both callers pass their own already-loaded
-  rows in rather than the module querying for itself, so two views of
-  the same data are never one request apart.
+**`suggested_order` was dropped from the view** in
+`supabase/migrations/20260922000003_drop_suggested_order.sql` (22 Sep
+2026). It was the original rule — top back up to `target_level` once
+`available` fell to `low_stock_alert` — and it knew nothing about what
+sold or about `retired_at`, so it went on proposing stock for retired
+lines. `/restock` stopped reading it first; the home page's "lines to
+reorder" tile was the last reader and moved to the same projection, at
+which point the two stopped disagreeing (the tile had been saying 59
+lines where `/restock` said 30). **What to buy comes from
+`projectRestock()` in `lib/restock.ts` and nowhere else.** That
+projects demand from sales in the most recently **completed** Aug–Feb season (never
+one still running, which would under-project every line), with
+midnight pinned to Australia/Melbourne regardless of device timezone
+and a half-open upper bound so 28 Feb isn't dropped. It suggests
+`max(0, demand − available)`. `stock_items.target_level` **keeps its
+column** so the numbers the committee already entered are not burned,
+and the view still exposes it, but nothing reads or writes it: the
+Adjust and Add item modals lost their "Target to hold" field in the
+same change. `can_change_targets` keeps its column name — renaming it
+would touch four API routes, the invitation flow and two trigger
+functions for a caption — but it now gates only `low_stock_alert`,
+and the Admin page labels it "Low-stock alert" accordingly.
 
-  **A retired line is hidden from every screen that offers or totals
-  stock, and kept everywhere that records it.** Hidden: the Stock
-  grid and its three summary figures, the `/sell` size chips, the Add
-  order item list, the home page's on-hand and reorder tiles, and
-  `lib/wix-push.ts`'s report. Kept: order history, the orders
-  classification (`byId` in `TrackerSection.tsx` is deliberately built
-  from the unfiltered list, so a past order still resolves to a product
-  name), the home page's ready-to-hand-over count (an order placed
-  before a line was retired is still owed), and `stock_movements`.
+Two traps in that formula: `shortfall` equals `−available` whenever
+stock is oversold, so adding both double-counts the oversold units —
+it is displayed but never added. And an order counts toward demand
+once it is paid *or* handed over, so an abandoned payment link cannot
+inflate next season's buy.
 
-  Availability is not a substitute for this check. A size with
-  `available <= 0` stays sellable on `/sell` as a back-order, which is
-  right for a garment on order and wrong for one the club no longer
-  sells, so `/sell` filtered on stock alone would keep offering retired
-  sizes forever. It did: the retired junior sizes went on appearing
-  under "Men's One Day Playing Shirt", because the product tile is
-  built from the name and the adult sizes kept it on screen.
+"No history" is decided by **`stock_items.wix_listed_at`**, not by
+whether a line is linked to Wix. A line listed after the window began
+could not have sold during it. The old proxy (`wix_product_id IS
+NULL`) collapsed twice over: `wix-sync`'s name+size fallback can match
+an unlinked row, and a catalogue import linked 39 lines at once, which
+made every one of them read as having sold nothing last season. Real
+sales always take precedence over the label — a line that sold was
+self-evidently on sale.
+`wix_listed_at` is stamped by `wix-import` when it first links or
+creates a line and **never changed after**, which
+`check_stock_item_update` enforces rather than leaving to the route.
+Re-stamping would make an old line look new and erase its history.
+No-history lines with nothing to buy sit in a collapsed "New to the
+shop" block below the order list; one with a shortfall stays in the
+main list, because owed stock is a real obligation however new the
+line is.
+**Lines with `stock_items.retired_at` set are skipped entirely.** The
+retired pre-2026 pants line still had 2 units of demand in last
+season's window and was duly suggesting the club buy two more of a
+product it no longer sells. Retirement could not be inferred from the
+absence of a Wix link — an unlinked line may simply never have been
+in the online shop while still being sold at the ground — so it is an
+explicit column, admin-only, and never settable by a catalogue
+import. Stock, orders and history on a retired line are untouched.
+`stock_items.created_at` is identical on every row (the date this
+repo's migrations first ran), so it cannot tell you when a line became
+sellable and must not be used for this.
 
-  In `wix-push` the exclusion is placed *before* the `skipped`
-  reporting, not after. Retirement clears `wix_variant_id`, so a
-  retired size of a sized product would otherwise report "has no
-  variant id" on every single run — a standing complaint about
-  something already decided.
-  The window's offset is read from `Intl` per boundary, not hardcoded:
-  Melbourne is UTC+10 on 1 Aug but UTC+11 on 1 Mar, so one fixed offset
-  would put an end of the window an hour out. Which season it is gets
-  judged on the club's clock too — a device set to UTC is still 31 July
-  when it is already August at the ground.
-  Which season counts as "completed" depends on the month: Jan–Feb
-  reaches back an extra year because the season that began last August
-  is still running, while Mar–Jul and Aug–Dec both land on the season
-  that began last August. Mar–Jul is the easy one to get wrong — it is
-  the tail of the calendar year but the season has already finished.
-- `stock_status` — `ok | low | out | oversold`.
+The projection lives in **`lib/restock.ts`** (`projectRestock()`),
+not in the page, because the home page's "lines to reorder" tile
+needs the same answer. Both callers pass their own already-loaded
+rows in rather than the module querying for itself, so two views of
+the same data are never one request apart.
+
+**A retired line is hidden from every screen that offers or totals
+stock, and kept everywhere that records it.** Hidden: the Stock
+grid and its three summary figures, the `/sell` size chips, the Add
+order item list, the home page's on-hand and reorder tiles, and
+`lib/wix-push.ts`'s report. Kept: order history, the orders
+classification (`byId` in `TrackerSection.tsx` is deliberately built
+from the unfiltered list, so a past order still resolves to a product
+name), the home page's ready-to-hand-over count (an order placed
+before a line was retired is still owed), and `stock_movements`.
+
+Availability is not a substitute for this check. A size with
+`available <= 0` stays sellable on `/sell` as a back-order, which is
+right for a garment on order and wrong for one the club no longer
+sells, so `/sell` filtered on stock alone would keep offering retired
+sizes forever. It did: the retired junior sizes went on appearing
+under "Men's One Day Playing Shirt", because the product tile is
+built from the name and the adult sizes kept it on screen.
+
+In `wix-push` the exclusion is placed *before* the `skipped`
+reporting, not after. Retirement clears `wix_variant_id`, so a
+retired size of a sized product would otherwise report "has no
+variant id" on every single run — a standing complaint about
+something already decided.
+The window's offset is read from `Intl` per boundary, not hardcoded:
+Melbourne is UTC+10 on 1 Aug but UTC+11 on 1 Mar, so one fixed offset
+would put an end of the window an hour out. Which season it is gets
+judged on the club's clock too — a device set to UTC is still 31 July
+when it is already August at the ground.
+Which season counts as "completed" depends on the month: Jan–Feb
+reaches back an extra year because the season that began last August
+is still running, while Mar–Jul and Aug–Dec both land on the season
+that began last August. Mar–Jul is the easy one to get wrong — it is
+the tail of the calendar year but the season has already finished.
 
 Stock quantity itself only changes via two triggers on `orders`, and
 **neither fires on INSERT** — stock moves on handover, not on sale

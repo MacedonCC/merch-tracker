@@ -24,7 +24,12 @@ export interface InvitationRow extends MemberPermissions {
 const PERMISSIONS: { key: keyof MemberPermissions; label: string; title: string }[] = [
   { key: 'can_adjust_stock', label: 'Stock', title: 'Can change how much is on hand' },
   { key: 'can_change_prices', label: 'Prices', title: 'Can change item prices' },
-  { key: 'can_change_targets', label: 'Targets', title: 'Can change low-stock and target levels' },
+  // The column is still can_change_targets and stays that way - renaming
+  // it would touch four API routes, the invitation flow and two trigger
+  // functions for a caption. What it actually gates is the low-stock
+  // alert: target levels stopped being written on 22 Sep 2026 and
+  // suggested_order was dropped from stock_overview in the same change.
+  { key: 'can_change_targets', label: 'Low-stock alert', title: 'Can change the low-stock alert' },
   { key: 'can_undo_handover', label: 'Undo', title: 'Can reverse a handover' },
 ];
 
