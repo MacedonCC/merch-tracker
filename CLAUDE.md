@@ -213,9 +213,30 @@ the import actually brought in. A failed import aborts the push rather
 than pushing on figures known to be stale.
 
 `wix-inventory` is **retired** and answers 410 — the tracker is the
-source of truth for stock, Wix inventory tracking is off for almost the
-whole catalogue, and `check_stock_item_update` refused its writes
-anyway.
+source of truth for stock, and `check_stock_item_update` refused its
+writes anyway.
+
+**Wix inventory tracking is now ON for the whole catalogue.** An older
+note here said it was off for almost all of it; that was true when it
+was written and is no longer. Checked 22 Sep 2026 against
+`wix-import`'s `wixStock`: all 16 merchandise products come back
+`trackQuantity: true`. Do not reason from the old claim — the reasons
+`wix-inventory` is retired never depended on it.
+
+What tracking does *not* mean is that Wix holds a figure for every
+size. 15 of 103 catalogue sizes have **no inventory record at all**
+for their variant, reported as `wixQuantity: null` with
+`wixTracked: true` — "Wix did not say", which is not the same as
+"Wix says none". They cluster in never-stocked sizes (4XL, JNR16) and
+Wix appears to create a variant's record only once a quantity has been
+set for it, including to zero; other zero-availability sizes do have a
+0 record. A push does **not** skip them: `pushAvailableToWix` finds no
+`current` variant, records `previousQuantity: null`, and still sends
+the variant in the PATCH. At the time of checking all 15 had
+`max(0, available) = 0`, so a push would write 0 to each and change
+nothing a customer can buy — but it would count all 15 as
+`wouldChange` on that first run, since `null !== 0`, and settle
+afterwards.
 
 **`middleware.ts` excludes all of `api/` from the matcher, and must keep
 doing so.** Middleware redirects an unauthenticated request to `/login`,
