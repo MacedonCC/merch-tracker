@@ -725,6 +725,16 @@ export default function TrackerSection({
   // Map every render would defeat that memo.
   const byId = useMemo(() => new Map(stock.map((s) => [s.id, s])), [stock]);
 
+  // Everything a person browses or picks from reads liveStock; only
+  // order history reads `stock`. A retired line is a line the club has
+  // stopped selling, so offering it for a new order is offering
+  // something that cannot be supplied - but its past orders still have
+  // to resolve to a product name, which is why byId above keeps them.
+  const liveStock = useMemo(
+    () => stock.filter((s) => !retired.has(s.id)),
+    [stock, retired]
+  );
+
   // Restock is projected from last season's sales, NOT target_level.
   // target_level is left in place on stock_items and still drives
   // stock_overview.suggested_order; this page simply stops reading it.
@@ -825,9 +835,13 @@ export default function TrackerSection({
   const restockUnits = restockOrder.reduce((n, g) => n + g.units, 0);
   const restockValue = restockOrder.reduce((n, g) => n + g.value, 0);
 
-  const totalOnHand = stock.reduce((n, s) => n + s.on_hand, 0);
-  const totalCommitted = stock.reduce((n, s) => n + s.committed, 0);
-  const totalShort = stock.reduce((n, s) => n + s.shortfall, 0);
+  // Counted over liveStock so the summary and the grid below it can
+  // never disagree: a figure the grid has no row to explain reads as a
+  // bug in the grid. Retirement zeroes a line's stock (see migration
+  // 20260922000001), so today this changes none of the three.
+  const totalOnHand = liveStock.reduce((n, s) => n + s.on_hand, 0);
+  const totalCommitted = liveStock.reduce((n, s) => n + s.committed, 0);
+  const totalShort = liveStock.reduce((n, s) => n + s.shortfall, 0);
   const toOrder = restockUnits;
   const owed = orders
     .filter((o) => o.payment_status === 'pending')
@@ -836,7 +850,7 @@ export default function TrackerSection({
   // Search and category match the product; the status filter keeps any
   // product with at least one size in that state (the non-matching
   // cells are dimmed rather than dropped, so the row still adds up).
-  const visibleGroups = groupStock(stock)
+  const visibleGroups = groupStock(liveStock)
     .filter((g) => {
       const q = search.trim().toLowerCase();
       if (q && !g.name.toLowerCase().includes(q)) return false;
@@ -1416,7 +1430,7 @@ export default function TrackerSection({
             <div className="field"><label>Email (optional)</label><input name="email" type="email" /></div>
             <div className="field"><label>Item</label>
               <select name="item">
-                {stock.map((i) => (
+                {liveStock.map((i) => (
                   <option key={i.id} value={i.id}>
                     {i.name} · {i.size} ({i.available} available)
                   </option>

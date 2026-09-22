@@ -32,11 +32,24 @@ export default function HomeTiles() {
   useEffect(() => {
     (async () => {
       const supabase = createClient();
-      const [{ data: stock }, { data: orders }] = await Promise.all([
+      // retired_at is on stock_items, not on the stock_overview view,
+      // so retired lines are read separately and dropped. Without this
+      // the home tile counts stock the Stock page no longer shows, and
+      // two screens disagree about the size of the cupboard.
+      const [{ data: stock }, { data: orders }, { data: meta }] = await Promise.all([
         supabase.from('stock_overview').select('id, on_hand, suggested_order'),
         supabase.from('orders').select('quantity, payment_status, distributed_at, stock_item_id'),
+        supabase.from('stock_items').select('id, retired_at'),
       ]);
 
+      const retired = new Set(
+        (meta ?? []).filter((m) => m.retired_at).map((m) => m.id as string)
+      );
+      const live = (stock ?? []).filter((s) => !retired.has(s.id as string));
+
+      // Handovers are judged on every line, retired or not: an order
+      // placed before a line was retired is still owed, and hiding the
+      // stock that would settle it would lose the obligation.
       const onHandById = new Map((stock ?? []).map((s) => [s.id, s.on_hand as number]));
 
       const readyToHandOver = (orders ?? []).filter((o) => {
@@ -46,9 +59,9 @@ export default function HomeTiles() {
       }).length;
 
       setCounts({
-        onHand: (stock ?? []).reduce((n, s) => n + (s.on_hand as number), 0),
+        onHand: live.reduce((n, s) => n + (s.on_hand as number), 0),
         readyToHandOver,
-        linesToReorder: (stock ?? []).filter((s) => (s.suggested_order as number) > 0).length,
+        linesToReorder: live.filter((s) => (s.suggested_order as number) > 0).length,
       });
       setLoading(false);
     })();

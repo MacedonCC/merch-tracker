@@ -302,6 +302,30 @@ actually uses:
   `stock_items.created_at` is identical on every row (the date this
   repo's migrations first ran), so it cannot tell you when a line became
   sellable and must not be used for this.
+
+  **A retired line is hidden from every screen that offers or totals
+  stock, and kept everywhere that records it.** Hidden: the Stock
+  grid and its three summary figures, the `/sell` size chips, the Add
+  order item list, the home page's on-hand and reorder tiles, and
+  `lib/wix-push.ts`'s report. Kept: order history, the orders
+  classification (`byId` in `TrackerSection.tsx` is deliberately built
+  from the unfiltered list, so a past order still resolves to a product
+  name), the home page's ready-to-hand-over count (an order placed
+  before a line was retired is still owed), and `stock_movements`.
+
+  Availability is not a substitute for this check. A size with
+  `available <= 0` stays sellable on `/sell` as a back-order, which is
+  right for a garment on order and wrong for one the club no longer
+  sells, so `/sell` filtered on stock alone would keep offering retired
+  sizes forever. It did: the retired junior sizes went on appearing
+  under "Men's One Day Playing Shirt", because the product tile is
+  built from the name and the adult sizes kept it on screen.
+
+  In `wix-push` the exclusion is placed *before* the `skipped`
+  reporting, not after. Retirement clears `wix_variant_id`, so a
+  retired size of a sized product would otherwise report "has no
+  variant id" on every single run — a standing complaint about
+  something already decided.
   The window's offset is read from `Intl` per boundary, not hardcoded:
   Melbourne is UTC+10 on 1 Aug but UTC+11 on 1 Mar, so one fixed offset
   would put an end of the window an hour out. Which season it is gets

@@ -74,6 +74,7 @@ interface ItemRow {
   id: string;
   wix_product_id: string | null;
   wix_variant_id: string | null;
+  retired_at: string | null;
 }
 
 interface WixVariantStock {
@@ -130,7 +131,7 @@ export async function pushAvailableToWix(opts: {
   const supabase = createAdminSupabase();
   const [{ data: overview }, { data: items }] = await Promise.all([
     supabase.from('stock_overview').select('id, name, size, on_hand, committed, available'),
-    supabase.from('stock_items').select('id, wix_product_id, wix_variant_id'),
+    supabase.from('stock_items').select('id, wix_product_id, wix_variant_id, retired_at'),
   ]);
 
   const linkById = new Map(((items ?? []) as ItemRow[]).map((r) => [r.id, r]));
@@ -157,6 +158,12 @@ export async function pushAvailableToWix(opts: {
   for (const row of ((overview ?? []) as OverviewRow[])) {
     const link = linkById.get(row.id);
     if (!link?.wix_product_id) continue; // not in the shop; nothing to push
+    // A retired line is not a push failure, so it is dropped before
+    // the reporting below rather than landing in `skipped`. Retirement
+    // clears wix_variant_id, which would otherwise make every retired
+    // size of a sized product report as "has no variant id" on every
+    // run - a standing complaint about something already decided.
+    if (link.retired_at) continue;
 
     const invItem = invByProduct.get(link.wix_product_id);
     if (!invItem?.id) {
