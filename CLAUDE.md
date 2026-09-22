@@ -381,6 +381,15 @@ structurally impossible, not merely avoided: migration
 carrying `quantity` — even bundled with an allowed column — is refused
 by the database.
 
+A created line's category comes from `guessCategory()`, which matches
+on words in the product name and is only ever consulted for a line
+being **created** — it never reclassifies an existing row. Shorts is
+matched as `/shorts/`, the plural as a whole word: a substring
+test for "short" read "Juniors Coloured Playing Shirts Short Sleeve
+(Unisex)" as Shorts, because the garment is named for its sleeves.
+Testing `shirt` before `short` would fix that one name and break the
+next product that mentions both.
+
 Matching is by name + size via `nameSizeKey()` in `lib/types.ts`, shared
 with `wix-sync`'s fallback so the two cannot drift. A size that imports
 under one spelling and syncs under another would create a line that

@@ -131,12 +131,22 @@ function authorised(req: NextRequest): boolean {
 // Hat" and "MCC Senior Baggy Cap" both need to land somewhere specific,
 // and a single hat/cap rule used to put the broad-rim in with the caps.
 // Keep in step with CATEGORIES in components/TrackerSection.tsx.
+//
+// SHORTS IS MATCHED ON THE PLURAL, as a whole word. A substring test
+// for "short" swallowed "Juniors Coloured Playing Shirts Short Sleeve
+// (Unisex)" and filed five junior shirt lines under Shorts - the
+// garment is named for its sleeves, not its legs. Ordering 'shirt'
+// above 'short' would fix that one name and break the next product
+// that genuinely mentions both. \bshorts\b does not match "Short
+// Sleeve" and still matches "Training Shorts", which is the actual
+// distinction: the plural noun names the garment, the adjective
+// describes part of another one.
 function guessCategory(name: string): string {
   const n = name.toLowerCase();
   if (n.includes('beanie')) return 'Beanie';
   if (n.includes('hoodie') || n.includes('hoody')) return 'Hoodie';
   if (n.includes('jacket') || n.includes('vest')) return 'Jacket';
-  if (n.includes('short')) return 'Shorts';
+  if (/\bshorts\b/.test(n)) return 'Shorts';
   if (n.includes('pant')) return 'Pants';
   if (n.includes('cap') || n.includes('baggy')) return 'Cap';
   if (n.includes('hat')) return 'Hat';
