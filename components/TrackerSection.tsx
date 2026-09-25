@@ -2,7 +2,6 @@
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createClient } from '@/lib/supabase-client';
-import { sizeRank } from '@/lib/types';
 import { projectRestock } from '@/lib/restock';
 import type { MemberPermissions } from '@/lib/member';
 
@@ -86,7 +85,9 @@ export type Section = 'stock' | 'restock' | 'orders';
 // assigns one of these to any line it creates. A category the dropdown
 // does not list would be invisible to the Stock page filter.
 const CATEGORIES = ['T-Shirt', 'Hoodie', 'Jacket', 'Shorts', 'Pants', 'Cap', 'Hat', 'Beanie', 'Other'];
-const SIZES = ['JNR8', 'JNR10', 'JNR12', 'JNR14', 'JNR16', 'XS', 'S', 'M', 'L', 'XL', '2XL', '3XL', '4XL', 'Small', 'Medium', 'Large', 'One size'];
+const SIZES = ['JNR8', 'JNR10', 'JNR12', 'JNR14', 'JNR16', 'XS', 'S', 'M', 'L', 'XL', '2XL', '3XL', '4XL',
+  'L6', 'L8', 'L10', 'L12', 'L14', 'L16', 'L18',
+  'Small', 'Medium', 'Large', 'One size'];
 
 interface StockRow {
   id: string;
@@ -144,7 +145,9 @@ const itemLabel = (item: { name: string; size: string } | null | undefined) =>
 // normalised onto one of these by sizeColumn(); anything unrecognised
 // lands in a trailing Other column rather than being dropped — the grid
 // must never hide stock.
-const SIZE_COLUMNS = ['JNR8', 'JNR10', 'JNR12', 'JNR14', 'JNR16', 'XS', 'S', 'M', 'L', 'XL', '2XL', '3XL', '4XL', 'One size'];
+const SIZE_COLUMNS = ['JNR8', 'JNR10', 'JNR12', 'JNR14', 'JNR16', 'XS', 'S', 'M', 'L', 'XL', '2XL', '3XL', '4XL',
+  'L6', 'L8', 'L10', 'L12', 'L14', 'L16', 'L18',
+  'One size'];
 const OTHER_COLUMN = 'Other';
 const MATRIX_COLUMNS = [...SIZE_COLUMNS, OTHER_COLUMN];
 

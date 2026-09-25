@@ -43,11 +43,28 @@ export function stockStatus(item: Pick<StockItem, 'quantity' | 'low_stock_alert'
 
 // Canonical size order, matching the vocabulary standardised in
 // migration 20260920000001 (juniors, then adult small to large, then
-// one-size items). sizeRank() falls back to the end of the list rather
-// than dropping anything unrecognised, so a new size still renders.
+// the women's L-sizes, then one-size items). sizeRank() falls back to
+// the end of the list rather than dropping anything unrecognised, so a
+// new size still renders.
+//
+// THIS LIST HAS TWO SIBLINGS in components/TrackerSection.tsx, and a
+// size has to be added to all three or it half-appears: SIZE_COLUMNS
+// (the Stock grid's columns — a size missing there falls into the
+// trailing "Other" column) and SIZES (the Add/Adjust dropdown — a size
+// missing there cannot be typed in by hand at all). The women's polo
+// sizes L6-L18 arrived as exactly that: added here alone, Restock and
+// /sell would have ordered them correctly while the Stock page showed
+// all seven squashed into one "Other" cell, which reads as a bug in
+// the grid rather than a gap in a list.
+//
+// L6-L18 sit after 4XL rather than interleaved with the adult sizes:
+// they are a parallel women's range, not points on the same scale, and
+// no product carries both. Exact string matching keeps 'L6' clear of
+// 'L' in all three lists.
 export const SIZE_ORDER = [
   'JNR8', 'JNR10', 'JNR12', 'JNR14', 'JNR16',
   'XS', 'S', 'M', 'L', 'XL', '2XL', '3XL', '4XL',
+  'L6', 'L8', 'L10', 'L12', 'L14', 'L16', 'L18',
   'One size',
 ];
 
