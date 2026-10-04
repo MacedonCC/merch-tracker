@@ -546,6 +546,16 @@ button.matrix-line:hover { background-color: var(--tint); }
     overflow: hidden;
     z-index: 2;
   }
+  /* .matrix th, .matrix td sets white-space: nowrap at (0,1,1) — a
+     class plus an element — which always beat .matrix-product's own
+     white-space: normal at (0,1,0), on desktop too. Invisible there
+     because table-layout: auto just grew the column to fit the
+     unwrapped name; fixed layout above can't grow it, so nowrap
+     started actually clipping text against the overflow: hidden set
+     two lines up. .matrix-product is only ever a <th> (both the
+     "Product" head and each row's header), so matching that exactly
+     clears .matrix th's extra element point without !important. */
+  .matrix th.matrix-product { white-space: normal; }
   .matrix thead .matrix-product { z-index: 3; }
 
   .matrix-name {
