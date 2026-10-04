@@ -168,10 +168,22 @@ input, select, textarea {
   background: var(--paper); color: var(--ink); width: 100%;
 }
 input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+/* iOS Safari zooms the whole page in on focus if a form control's
+   computed font-size is under 16px. */
+@media (max-width: 720px) {
+  input, select, textarea { font-size: 16px; }
+}
 
 .filters { display: flex; align-items: center; gap: 8px; padding: 0.75rem 1.15rem; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
 .filters input { max-width: 240px; }
 .filters select { max-width: 160px; }
+/* Phone: one filter per row, full width, so the search box and the two
+   dropdowns are each as easy to tap as the legend already is below
+   them (existing .matrix-legend rule a little further down). */
+@media (max-width: 720px) {
+  .filters { flex-direction: column; align-items: stretch; }
+  .filters input, .filters select { max-width: none; width: 100%; }
+}
 
 /* Six filters across the full width, equal columns rather than a
    wrapping flex line: a grid keeps every button the same size and the
@@ -259,6 +271,75 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1
   .orders-who { white-space: normal; }
 }
 
+/* ---------------- Orders on a phone: one card per order/customer ----
+   The table markup and its rowSpan'd "who"/"hand over all" cells for a
+   Ready group are untouched — only display turns each <tr> into a CSS
+   grid, so the existing DOM (name+action cell only on a group's first
+   row, every other row just carrying its own item) lands in the right
+   place without any JS or markup change. Status has no class of its
+   own in the markup, so it's addressed by position: it is always the
+   5th cell of a plain (non-Ready) row. */
+@media (max-width: 720px) {
+  .orders-table thead { display: none; }
+
+  .orders-table tr:has(.empty) { display: block; padding: 2rem 1rem; border-bottom: none; }
+  .orders-table tr:has(.empty) td { display: block; padding: 0; }
+
+  /* Unpaid / Waiting / Owing / Done / All — one order per card. */
+  .orders-table tbody:not(.order-group) > tr {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    row-gap: 6px; column-gap: 10px;
+    padding: 0.9rem 1rem;
+    border-bottom: 1px solid var(--line);
+  }
+  .orders-table tbody:not(.order-group) > tr > td {
+    display: block; border: none; padding: 0; text-align: left; white-space: normal; width: auto;
+  }
+  .orders-table .orders-who  { grid-column: 1 / 3; grid-row: 1; }
+  .orders-table .orders-menu { grid-column: 3; grid-row: 1; justify-self: end; }
+  .orders-table .orders-qty  { grid-column: 1; grid-row: 2; color: var(--ink-faint); font-size: 0.85rem; }
+  .orders-table .orders-qty::before { content: "\00d7\00a0"; }
+  .orders-table .orders-item { grid-column: 2; grid-row: 2; }
+  .orders-table .orders-date { grid-column: 1 / 4; grid-row: 3; font-size: 0.8rem; color: var(--ink-faint); }
+  /* Status cell — unclassed in the markup, always the 5th <td> here. */
+  .orders-table tbody:not(.order-group) > tr > td:nth-child(5) { grid-column: 1 / 4; grid-row: 4; }
+  .orders-table .orders-action { grid-column: 1 / 4; grid-row: 5; }
+  .orders-table .orders-action button { width: 100%; min-height: 44px; font-size: 0.88rem; }
+
+  /* Ready — one card per customer. First <tr> of the tbody carries the
+     rowSpan'd name + "Hand over"/"Hand over all" button; later <tr>s in
+     the same tbody are additional item lines in the same card. */
+  .orders-table tbody.order-group {
+    display: block; padding: 0.9rem 1rem; border-bottom: 2px solid var(--line-strong);
+  }
+  .orders-table tbody.order-group > tr {
+    display: grid; grid-template-columns: auto 1fr auto; row-gap: 6px; column-gap: 10px;
+  }
+  .orders-table tbody.order-group > tr > td {
+    display: block; border: none; padding: 0; text-align: left; white-space: normal; width: auto;
+  }
+  .orders-table tbody.order-group > tr:has(.orders-who) { padding-bottom: 6px; }
+  .orders-table tbody.order-group > tr:has(.orders-who) .orders-who   { grid-column: 1 / 3; grid-row: 1; }
+  .orders-table tbody.order-group > tr:has(.orders-who) .orders-menu  { grid-column: 3; grid-row: 1; justify-self: end; }
+  .orders-table tbody.order-group > tr:has(.orders-who) .orders-qty   { grid-column: 1; grid-row: 2; color: var(--ink-faint); font-size: 0.85rem; }
+  .orders-table tbody.order-group > tr:has(.orders-who) .orders-qty::before { content: "\00d7\00a0"; }
+  .orders-table tbody.order-group > tr:has(.orders-who) .orders-item  { grid-column: 2; grid-row: 2; }
+  .orders-table tbody.order-group > tr:has(.orders-who) .orders-date  { grid-column: 1 / 4; grid-row: 3; font-size: 0.8rem; color: var(--ink-faint); }
+  .orders-table tbody.order-group > tr:has(.orders-who) .order-group-action { grid-column: 1 / 4; grid-row: 4; margin-top: 4px; }
+
+  .orders-table tbody.order-group > tr:not(:has(.orders-who)) {
+    padding: 6px 0; border-top: 1px solid rgba(255, 255, 255, 0.05);
+  }
+  .orders-table tbody.order-group > tr:not(:has(.orders-who)) .orders-qty  { grid-column: 1; grid-row: 1; color: var(--ink-faint); font-size: 0.85rem; }
+  .orders-table tbody.order-group > tr:not(:has(.orders-who)) .orders-qty::before { content: "\00d7\00a0"; }
+  .orders-table tbody.order-group > tr:not(:has(.orders-who)) .orders-item { grid-column: 2; grid-row: 1; }
+  .orders-table tbody.order-group > tr:not(:has(.orders-who)) .orders-menu { grid-column: 3; grid-row: 1; justify-self: end; }
+  .orders-table tbody.order-group > tr:not(:has(.orders-who)) .orders-date { grid-column: 1 / 4; grid-row: 2; font-size: 0.78rem; color: var(--ink-faint); }
+
+  .order-group-action button { width: 100%; min-height: 44px; font-size: 0.88rem; }
+}
+
 .sr-only {
   position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
   overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
@@ -283,6 +364,14 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1
   box-shadow: none;
 }
 .row-menu-item:hover { background: var(--wash); }
+/* Bigger ⋯ button and taller menu rows so adjacent items can't be
+   mis-tapped; useLayoutEffect's up/down flip in RowMenu measures the
+   rendered menu itself, so it keeps working at this size unchanged. */
+@media (max-width: 720px) {
+  .row-menu-btn { min-width: 44px; min-height: 44px; font-size: 1.15rem; }
+  .row-menu { min-width: 190px; max-width: calc(100vw - 32px); }
+  .row-menu-item { min-height: 44px; display: flex; align-items: center; padding: 0.7rem 1rem; font-size: 0.9rem; }
+}
 
 .field { margin-bottom: 0.85rem; }
 .field label { display: block; font-size: 0.78rem; color: var(--ink-soft); margin-bottom: 4px; }
@@ -416,6 +505,16 @@ button.matrix-line:hover { background-color: var(--tint); }
 
 @media (max-width: 640px) {
   .matrix-product { min-width: 120px; }
+}
+
+/* Tighter cells so more of the grid fits before the sideways scroll
+   kicks in — the scroll container and the pinned product column
+   (.matrix-wrap / .matrix-product above) are unchanged. */
+@media (max-width: 720px) {
+  .matrix th, .matrix td { padding: 0.3rem 0.2rem; font-size: 0.78rem; }
+  .matrix-line { padding: 0.3rem 0.15rem; gap: 3px; }
+  .matrix-num { width: 2.3rem; }
+  .matrix .matrix-total { width: 2.6rem; }
 }
 
 .tile-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; margin-bottom: 1.75rem; }
@@ -769,6 +868,11 @@ th.num, td.num { text-align: right; }
 
 /* Card header with more than one action. */
 .head-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+/* "Push to Wix now" / "Add item" / "Add order" — the card-head buttons
+   on Orders and Stock — get a comfortable tap target on a phone. */
+@media (max-width: 720px) {
+  .card-head button { min-height: 44px; padding: 10px 16px; font-size: 0.85rem; }
+}
 
 /* Result of a "Push to Wix now". Persistent rather than a timed flash:
    it reports a change to the public shop, which is worth reading. */
