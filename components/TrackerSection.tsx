@@ -110,6 +110,7 @@ interface OrderRow {
   customer_name: string;
   customer_email: string | null;
   stock_item_id: string | null;
+  given_stock_item_id: string | null;
   quantity: number;
   unit_price: number;
   payment_status: 'pending' | 'paid' | 'refunded';
@@ -120,6 +121,9 @@ interface OrderRow {
   ordered_at: string;
   notes: string | null;
   stock_items?: { name: string; size: string } | null;
+  // Only present when a different size was handed over than was
+  // ordered — see "Hand over a different size" below.
+  given_item?: { name: string; size: string } | null;
 }
 
 const money = (n: number) =>
@@ -135,6 +139,23 @@ const itemLabel = (item: { name: string; size: string } | null | undefined) =>
       {item.name} <span className="size-pill">{item.size}</span>
     </>
   ) : '—';
+
+// Same as itemLabel, but when a different size was handed over than
+// was ordered, shows both: "Product JNR12 → JNR14" rather than
+// silently showing only one of them.
+const orderItemLabel = (o: OrderRow) => {
+  if (o.given_item && o.given_stock_item_id && o.given_stock_item_id !== o.stock_item_id) {
+    return (
+      <>
+        {o.stock_items?.name ?? o.given_item.name}{' '}
+        <span className="size-pill">{o.stock_items?.size}</span>
+        {' → '}
+        <span className="size-pill">{o.given_item.size}</span>
+      </>
+    );
+  }
+  return itemLabel(o.stock_items);
+};
 
 // ---- Stock matrix ---------------------------------------------------
 // The Stock page is one row per product and one column per size, so the
@@ -347,9 +368,12 @@ export default function TrackerSection({
   const [stock, setStock] = useState<StockRow[]>([]);
   const [orders, setOrders] = useState<OrderRow[]>([]);
   const [loading, setLoading] = useState(true);
-  const [modal, setModal] = useState<'item' | 'order' | 'edit' | 'handover' | null>(null);
+  const [modal, setModal] = useState<'item' | 'order' | 'edit' | 'handover' | 'substitute' | null>(null);
   const [editing, setEditing] = useState<StockRow | null>(null);
   const [handoverForm, setHandoverForm] = useState<{ ids: string[]; date: string; initials: string; note: string } | null>(null);
+  const [substituteForm, setSubstituteForm] = useState<{
+    id: string; date: string; initials: string; note: string; options: StockRow[]; givenId: string;
+  } | null>(null);
   const [message, setMessage] = useState('');
 
   const [search, setSearch] = useState('');
@@ -373,7 +397,11 @@ export default function TrackerSection({
       supabase.from('stock_overview').select('*').order('name').order('size'),
       supabase
         .from('orders')
-        .select('*, stock_items(name, size)')
+        // Two FKs from orders to stock_items now (stock_item_id,
+        // given_stock_item_id), so both embeds need an explicit hint —
+        // PostgREST refuses an ambiguous embed even when only one is
+        // requested.
+        .select('*, stock_items!stock_item_id(name, size), given_item:stock_items!given_stock_item_id(name, size)')
         .order('ordered_at', { ascending: false }),
       supabase.from('stock_items').select('id, wix_listed_at, retired_at'),
     ]);
@@ -601,10 +629,62 @@ export default function TrackerSection({
   async function undoHandover(id: string) {
     const { error } = await supabase
       .from('orders')
-      .update({ distributed_at: null, handed_over_by: null, handover_note: null })
+      // given_stock_item_id is cleared here too: the reversal trigger
+      // reads it from OLD before this clears it, so stock still goes
+      // back to whichever size it actually came off, and a re-done
+      // handover starts clean rather than carrying a stale substitute.
+      .update({ distributed_at: null, handed_over_by: null, handover_note: null, given_stock_item_id: null })
       .eq('id', id);
     if (error) return flash(error.message);
     flash('Handover reversed.');
+    load();
+  }
+
+  // Admin-only correction flow for when the customer was given a
+  // different size than they ordered. Offers every other live,
+  // non-retired size of the same product; the database (not just this
+  // filter) refuses a different product or a given size without enough
+  // stock to cover the order.
+  function openSubstituteModal(order: OrderRow) {
+    const ordered = order.stock_item_id ? byId.get(order.stock_item_id) : null;
+    if (!ordered) return flash('Cannot find the ordered item.');
+    const options = liveStock.filter((s) => s.name === ordered.name && s.id !== ordered.id);
+    if (options.length === 0) return flash('No other sizes of this product to give instead.');
+
+    const today = new Date().toISOString().slice(0, 10);
+    let remembered = '';
+    try { remembered = sessionStorage.getItem('handoverInitials') ?? ''; } catch {}
+
+    setSubstituteForm({ id: order.id, date: today, initials: remembered, note: '', options, givenId: options[0].id });
+    setModal('substitute');
+  }
+
+  async function saveSubstitute(form: HTMLFormElement) {
+    if (!substituteForm) return;
+    const f = new FormData(form);
+    const date = String(f.get('date') ?? '').trim();
+    const initials = String(f.get('initials') ?? '').trim();
+    const note = String(f.get('note') ?? '').trim() || null;
+    const givenId = String(f.get('given') ?? '');
+    if (!date) return flash('Date is required.');
+    if (!initials) return flash('Initials are required.');
+    if (!givenId) return flash('Pick the size actually given.');
+
+    try { sessionStorage.setItem('handoverInitials', initials); } catch {}
+
+    const { error } = await supabase
+      .from('orders')
+      .update({
+        distributed_at: new Date(`${date}T12:00:00`).toISOString(),
+        handed_over_by: initials,
+        handover_note: note,
+        given_stock_item_id: givenId,
+      })
+      .eq('id', substituteForm.id);
+    if (error) return flash(error.message);
+    setModal(null);
+    setSubstituteForm(null);
+    flash('Handed over a different size.');
     load();
   }
 
@@ -1060,7 +1140,7 @@ export default function TrackerSection({
                         </td>
                       )}
                       <td className="orders-qty">{i.quantity}</td>
-                      <td className="orders-item">{itemLabel(i.stock_items)}</td>
+                      <td className="orders-item">{orderItemLabel(i)}</td>
                       {/* Blank when it repeats the row above — a group's
                           items usually share one order date. A different
                           date (the customer ordered twice) still shows. */}
@@ -1080,6 +1160,7 @@ export default function TrackerSection({
                         <RowMenu
                           actions={[
                             { label: 'Hand over', onClick: () => openHandoverModal([i.id]) },
+                            ...(isAdmin ? [{ label: 'Hand over a different size', onClick: () => openSubstituteModal(i) }] : []),
                             ...(isAdmin ? [{ label: 'Remove', onClick: () => removeOrder(i.id) }] : []),
                           ]}
                         />
@@ -1099,7 +1180,7 @@ export default function TrackerSection({
                       <div>{o.customer_email ?? o.reference}</div>
                     </td>
                     <td className="orders-qty">{o.quantity}</td>
-                    <td className="orders-item">{itemLabel(o.stock_items)}</td>
+                    <td className="orders-item">{orderItemLabel(o)}</td>
                     <td className="orders-date">{formatDate(o.ordered_at)}</td>
                     <td>
                       {state === 'unpaid' && <span className="pill pill-out">Unpaid</span>}
@@ -1112,6 +1193,11 @@ export default function TrackerSection({
                             {o.handed_over_by && <>by {o.handed_over_by} </>}
                             {o.distributed_at && <>· {formatDate(o.distributed_at)}</>}
                           </div>
+                          {o.given_item && o.given_stock_item_id !== o.stock_item_id && (
+                            <div style={{ fontSize: '0.75rem', color: 'var(--ink-faint)', marginTop: 2 }}>
+                              Ordered {o.stock_items?.size} &rarr; Given {o.given_item.size}
+                            </div>
+                          )}
                         </>
                       )}
                       {state === 'ready' && <span className="pill pill-ok">Ready</span>}
@@ -1123,6 +1209,11 @@ export default function TrackerSection({
                             {o.handed_over_by && <>by {o.handed_over_by} </>}
                             {o.distributed_at && <>· {formatDate(o.distributed_at)}</>}
                           </div>
+                          {o.given_item && o.given_stock_item_id !== o.stock_item_id && (
+                            <div style={{ fontSize: '0.75rem', color: 'var(--ink-faint)', marginTop: 2 }}>
+                              Ordered {o.stock_items?.size} &rarr; Given {o.given_item.size}
+                            </div>
+                          )}
                           {o.handover_note && (
                             <div style={{ fontSize: '0.75rem', color: 'var(--ink-faint)', fontStyle: 'italic', marginTop: 2 }}>
                               “{o.handover_note}”
@@ -1151,6 +1242,9 @@ export default function TrackerSection({
                       <RowMenu
                         actions={[
                           ...(state === 'done' ? [{ label: 'Edit handover', onClick: () => openHandoverModal([o.id], o) }] : []),
+                          ...(isAdmin && (state === 'ready' || state === 'waiting')
+                            ? [{ label: 'Hand over a different size', onClick: () => openSubstituteModal(o) }]
+                            : []),
                           ...(isAdmin ? [{ label: 'Remove', onClick: () => removeOrder(o.id) }] : []),
                         ]}
                       />
@@ -1219,6 +1313,35 @@ export default function TrackerSection({
               <input name="initials" defaultValue={handoverForm.initials} placeholder="e.g. AB" required /></div>
             <div className="field"><label>Comments (optional)</label>
               <textarea name="note" rows={3} defaultValue={handoverForm.note}></textarea></div>
+            <div className="modal-actions">
+              <button type="button" onClick={() => setModal(null)}>Cancel</button>
+              <button type="submit" className="btn-solid">Confirm</button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {modal === 'substitute' && substituteForm && (
+        <div className="overlay" onClick={(e) => e.target === e.currentTarget && setModal(null)}>
+          <form className="modal" onSubmit={(e) => { e.preventDefault(); saveSubstitute(e.currentTarget); }}>
+            <h3>Hand over a different size</h3>
+            <p style={{ fontSize: '0.82rem', color: 'var(--ink-soft)', marginBottom: '1rem' }}>
+              Stock comes off the size actually given, not the size ordered. The order keeps its
+              original size on record.
+            </p>
+            <div className="field"><label>Size actually given</label>
+              <select name="given" defaultValue={substituteForm.givenId} autoFocus>
+                {substituteForm.options.map((s) => (
+                  <option key={s.id} value={s.id}>{s.size} ({s.on_hand} on hand)</option>
+                ))}
+              </select>
+            </div>
+            <div className="field"><label>Date handed over</label>
+              <input name="date" type="date" defaultValue={substituteForm.date} /></div>
+            <div className="field"><label>Initials</label>
+              <input name="initials" defaultValue={substituteForm.initials} placeholder="e.g. AB" required /></div>
+            <div className="field"><label>Comments (optional)</label>
+              <textarea name="note" rows={3} defaultValue={substituteForm.note}></textarea></div>
             <div className="modal-actions">
               <button type="button" onClick={() => setModal(null)}>Cancel</button>
               <button type="submit" className="btn-solid">Confirm</button>
