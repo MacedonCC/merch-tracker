@@ -407,7 +407,7 @@ export async function pushAvailableToWix(opts: {
   }
 
   const logRows: Array<Record<string, unknown>> = lines.map((l) => {
-    const err = okByLine.get(l.stockItemId) ?? 'not sent';
+    const err = okByLine.has(l.stockItemId) ? (okByLine.get(l.stockItemId) as string | null) : 'not sent';
     return {
       stock_item_id: l.stockItemId,
       wix_product_id: l.wixProductId,
