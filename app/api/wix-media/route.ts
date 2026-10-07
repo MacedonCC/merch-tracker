@@ -18,12 +18,11 @@ import { fetchProductsV3, WixV3Error, type RawProduct } from '@/lib/wix-catalogu
 
 // CATALOGUE V3. The V1 product read this used now answers 501 (Wix moved
 // the store to Catalog V3 on or after 6 Oct 2026). The read goes through
-// lib/wix-catalogue-v3.ts. Like wix-import it is dry-run only until a V3
-// run has been looked at: image and URL fields were written from the V3
-// docs, before any real response had been seen, and a wrong guess would
-// overwrite every product's image_url with null. ?dryRun=1 reports what
-// would change and writes nothing.
-const V3_WRITES_ENABLED = false;
+// lib/wix-catalogue-v3.ts. Writes were enabled on 7 Oct 2026 after a V3
+// dry run showed all 18 linked products with an image and URL and none
+// that would be blanked. (wix-import stays dry-run only: it has its own
+// V3_WRITES_ENABLED.) ?dryRun=1 still reports without writing.
+const V3_WRITES_ENABLED = true;
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;

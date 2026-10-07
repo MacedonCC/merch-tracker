@@ -420,8 +420,9 @@ rather than editing it). Write a new migration instead.
 **Catalog V3 (6 Oct 2026).** Wix moved the store to Catalog V3, so the V1
 product read and V2 inventory read below answer 501. The catalogue
 read now lives in `lib/wix-catalogue-v3.ts` (products, variants and
-inventory items are three separate V3 calls). `wix-import` and
-`wix-media` are **dry-run only** (`V3_WRITES_ENABLED = false`) until a V3
+inventory items are three separate V3 calls). `wix-import` is
+**dry-run only** (`V3_WRITES_ENABLED = false`; `wix-media` writes were
+enabled 7 Oct 2026) until a V3
 dry run has been read, because Wix's docs do not say whether variant ids
 survived the conversion — `staleVariantIds` is the test (the 7 Oct V3 dry
 run was clean: ids intact). The push (`lib/wix-push.ts`) is ported to
