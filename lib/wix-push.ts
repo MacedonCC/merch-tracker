@@ -30,7 +30,7 @@ import { fetchInventoryV3, WixV3Error } from '@/lib/wix-catalogue-v3';
 // one the shop sells from.
 //
 // THE V3 WRITE PATH HAS NEVER RUN. It was written from the docs and is
-// held off by V3_PUSH_WRITES_VERIFIED below, on top of WIX_PUSH_ENABLED.
+// held off by V3_PUSH_WRITES below, on top of WIX_PUSH_ENABLED.
 // Report mode (the preview) is the part that has been exercised; flip
 // the constant only after reading a preview and deciding to try a real
 // push on purpose.
@@ -40,7 +40,14 @@ import { fetchInventoryV3, WixV3Error } from '@/lib/wix-catalogue-v3';
 // Report mode does every read, builds every payload, and returns
 // exactly what would be sent.
 
-const V3_PUSH_WRITES_VERIFIED = false;
+// 'off'            never writes (the state it ships in).
+// 'single-product' writes only when the caller names ONE product with
+//                  ?product=, so the daily cron and the Stock page's
+//                  button - which name none - still cannot push the
+//                  whole shop while the V3 write path is being tried.
+// 'all'            normal operation, once a single-product test has been
+//                  checked in Wix and in the shop.
+const V3_PUSH_WRITES: 'off' | 'single-product' | 'all' = 'off';
 
 const WIX_API = 'https://www.wixapis.com';
 
@@ -328,7 +335,9 @@ export async function pushAvailableToWix(opts: {
     failed: 0,
   };
 
-  const reallyWrite = opts.write && pushEnabled() && V3_PUSH_WRITES_VERIFIED;
+  const writesAllowed =
+    V3_PUSH_WRITES === 'all' || (V3_PUSH_WRITES === 'single-product' && onlyProduct !== null);
+  const reallyWrite = opts.write && pushEnabled() && writesAllowed;
   if (!reallyWrite) {
     return {
       ok: true,
@@ -337,7 +346,9 @@ export async function pushAvailableToWix(opts: {
         ? 'Report only — nothing was sent to Wix.'
         : !pushEnabled()
           ? 'WIX_PUSH_ENABLED is not "true", so nothing was sent to Wix.'
-          : 'The Catalog V3 write path has not been verified yet, so nothing was sent to Wix.',
+          : V3_PUSH_WRITES === 'single-product'
+            ? 'Catalog V3 writes are limited to one product while being tested; add ?product=, so nothing was sent to Wix.'
+            : 'The Catalog V3 write path has not been verified yet, so nothing was sent to Wix.',
       counts, warnings, lines, skipped, failures,
       ...(onlyProduct
         ? {
