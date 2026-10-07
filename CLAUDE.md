@@ -428,7 +428,7 @@ survived the conversion — `staleVariantIds` is the test (the 7 Oct V3 dry
 run was clean: ids intact). The push (`lib/wix-push.ts`) is ported to
 the V3 bulk inventory update (read revision, set absolute quantity,
 single location only) but its write path has never run and is held off
-by `V3_PUSH_WRITES_VERIFIED = false` as well as `WIX_PUSH_ENABLED`; the
+by `V3_PUSH_WRITES = 'off'` (`single-product` allows a `?product=` test only) as well as `WIX_PUSH_ENABLED`; the
 preview (GET `/api/wix-push`) reports flags and `warnings`. Import-then-
 push ordering is unchanged.
 `?raw=1&product=<name or id>` on wix-import shows one product's real V3
