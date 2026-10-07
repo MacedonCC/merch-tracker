@@ -91,6 +91,9 @@ export interface PushResult {
   lines: PushLine[];
   skipped: string[];
   failures: string[];
+  /** The exact request a real push would make. Only present when the
+   *  push is limited to one product, where it is short enough to read. */
+  wouldSend?: { endpoint: string; body: unknown; unchangedNotSent: number };
 }
 
 interface OverviewRow {
@@ -150,6 +153,10 @@ export async function pushAvailableToWix(opts: {
   write: boolean;
   source: 'cron' | 'manual';
   pushedBy?: string | null;
+  /** Limit the push to one product: its exact tracker name
+   *  (case-insensitive) or its Wix product id. Meant for testing a real
+   *  push on a single low-stakes product before trusting it on all. */
+  product?: string | null;
 }): Promise<PushResult> {
   const skipped: string[] = [];
   const failures: string[] = [];
@@ -215,6 +222,8 @@ export async function pushAvailableToWix(opts: {
     invByProduct.set(item.productId, list);
   }
 
+  const onlyProduct = opts.product ? opts.product.trim().toLowerCase() : null;
+
   const lines: PushLine[] = [];
   /** The inventory item each line writes to, parallel to `lines`. */
   const target = new Map<string, InvItem>();
@@ -228,6 +237,10 @@ export async function pushAvailableToWix(opts: {
     // size of a sized product report as "has no variant id" on every
     // run - a standing complaint about something already decided.
     if (link.retired_at) continue;
+
+    if (onlyProduct && link.wix_product_id !== onlyProduct && row.name.toLowerCase() !== onlyProduct) {
+      continue;
+    }
 
     const label = `${row.name} / ${row.size}`;
     const productItems = invByProduct.get(link.wix_product_id) ?? [];
@@ -288,7 +301,20 @@ export async function pushAvailableToWix(opts: {
     for (const f of flags) warnings.push(`${label}: ${f}.`);
   }
 
+  if (onlyProduct && lines.length === 0) {
+    return {
+      ok: false, wrote: false,
+      reason: `No linked, unretired sizes matched product "${opts.product}". Use the exact product name or its Wix product id.`,
+      counts: { ...EMPTY_COUNTS, skipped: skipped.length }, warnings, lines, skipped, failures,
+    };
+  }
+
   const productIds = new Set(lines.map((l) => l.wixProductId));
+
+  // Only lines whose Wix value would actually move are sent. Every item
+  // sent bumps its revision, so sending 121 unchanged sizes a day would
+  // churn Wix's records and widen the window for a revision clash.
+  const moves = (l: PushLine) => l.previousQuantity !== l.setTo || l.previousTracked !== true;
 
   const counts = {
     linesConsidered: lines.length,
@@ -313,6 +339,22 @@ export async function pushAvailableToWix(opts: {
           ? 'WIX_PUSH_ENABLED is not "true", so nothing was sent to Wix.'
           : 'The Catalog V3 write path has not been verified yet, so nothing was sent to Wix.',
       counts, warnings, lines, skipped, failures,
+      ...(onlyProduct
+        ? {
+            wouldSend: {
+              endpoint: 'POST /stores/v3/bulk/inventory-items/update',
+              body: {
+                inventoryItems: lines.filter(moves).map((l) => {
+                  const inv = target.get(l.stockItemId) as InvItem;
+                  return { inventoryItem: { id: inv.id, revision: inv.revision, quantity: l.setTo } };
+                }),
+                reason: 'MANUAL',
+                returnEntity: false,
+              },
+              unchangedNotSent: lines.filter((l) => !moves(l)).length,
+            },
+          }
+        : {}),
     };
   }
 
@@ -322,8 +364,9 @@ export async function pushAvailableToWix(opts: {
   // revision that moved since the read (someone edited the item, or a
   // sale landed) fails that one item, not the whole push, and shows up
   // below as a failure to retry.
-  const ordered = lines.map((l) => ({ line: l, inv: target.get(l.stockItemId) as InvItem }));
   const okByLine = new Map<string, string | null>(); // null = ok, string = error
+  const ordered = lines.filter(moves).map((l) => ({ line: l, inv: target.get(l.stockItemId) as InvItem }));
+  for (const l of lines) if (!moves(l)) okByLine.set(l.stockItemId, null);
   for (let start = 0; start < ordered.length; start += 1000) {
     const chunk = ordered.slice(start, start + 1000);
     const res = await wixPost('/stores/v3/bulk/inventory-items/update', {

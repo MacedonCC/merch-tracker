@@ -60,6 +60,7 @@ export async function GET(req: NextRequest) {
     write: false,
     source: auth.who,
     pushedBy: auth.label,
+    product: req.nextUrl.searchParams.get('product'),
   });
   return json({ ...result, pushEnabled: pushEnabled(), mode: 'report' });
 }
@@ -84,6 +85,7 @@ export async function POST(req: NextRequest) {
     write: true,
     source: auth.who,
     pushedBy: auth.label,
+    product: req.nextUrl.searchParams.get('product'),
   });
   return json({
     ...result,
