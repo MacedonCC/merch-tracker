@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminSupabase } from '@/lib/supabase-server';
 import { nameSizeKey, tidyName } from '@/lib/types';
+import { loadCatalogueV3, WixV3Error, type CatProduct, type RawInventoryItem } from '@/lib/wix-catalogue-v3';
 
 // Reconciles the Wix catalogue against stock_items: links existing
 // tracker lines to their Wix product and variant, brings prices across,
@@ -43,44 +44,17 @@ import { nameSizeKey, tidyName } from '@/lib/types';
 // tracker's count, that is a deliberate human act with a
 // stock_movements row behind it, not a side effect of an import.
 
+// CATALOGUE V3. Wix moved the store to Catalog V3 (6 Oct 2026); the V1
+// product read and V2 inventory read this route used answer 501. The
+// read side now goes through lib/wix-catalogue-v3.ts. The write side
+// below is switched off (V3_WRITES_ENABLED) until a V3 dry run has been
+// read and approved, because whether Wix kept the old variant ids is not
+// documented - staleVariantIds in the dry run is the test. Do not turn
+// it on before that has been looked at.
+const V3_WRITES_ENABLED = false;
+
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
-
-interface WixVariant {
-  id?: string;
-  choices?: Record<string, string>;
-  variant?: { priceData?: { price?: number }; sku?: string };
-}
-
-interface WixProduct {
-  id: string;
-  name?: string;
-  productType?: string;
-  /** Wix's "Manage pricing and inventory for each product variant"
-   *  toggle. When it is off, Wix stores no variant records for the
-   *  product, so `variants` comes back empty even with
-   *  includeVariants: true and there is no variant id to link to. */
-  manageVariants?: boolean;
-  /** When Wix last changed this product. If the shop shows an edit that
-   *  this timestamp predates, the API is serving a stale catalogue and
-   *  the problem is upstream of this route. */
-  lastUpdated?: string;
-  numericId?: string;
-  priceData?: { price?: number };
-  productOptions?: Array<{ name?: string; choices?: Array<{ value?: string }> }>;
-  variants?: WixVariant[];
-}
-
-/** A product's inventory record. Wix keeps stock in a different API
- *  from the catalogue, so reading it is a second request. */
-interface WixInventoryItem {
-  id?: string;
-  productId?: string;
-  /** False when Wix is not counting this product at all, in which case
-   *  its quantities are meaningless rather than zero. */
-  trackQuantity?: boolean;
-  variants?: Array<{ variantId?: string; quantity?: number; inStock?: boolean }>;
-}
 
 interface StockRow {
   id: string;
@@ -98,7 +72,12 @@ interface CatalogueEntry {
   productId: string;
   productName: string;
   size: string;
+  /** The id reported to the tracker: null for an unsized product, as it
+   *  has always been. */
   variantId: string | null;
+  /** The real V3 variant id, used only to look up Wix's inventory. An
+   *  unsized V3 product still has exactly one (default) variant. */
+  inventoryVariantId: string | null;
   price: number;
 }
 
@@ -164,37 +143,48 @@ function looksLikeAFee(name: string): boolean {
 // Flattens a Wix product into one entry per size. A product with no
 // size option yields a single "One size" entry with no variant id,
 // which is how an unsized product has always been represented here.
-function catalogueEntries(p: WixProduct): CatalogueEntry[] {
-  const productName = tidyName(p.name ?? '');
-  const basePrice = p.priceData?.price ?? 0;
+// Sizes come from the variants' own option choices (V3 product queries
+// return no variants, so there is no product-level option list to read).
+function catalogueEntries(p: CatProduct): CatalogueEntry[] {
+  const productName = tidyName(p.name);
 
-  const sizeOption = (p.productOptions ?? []).find((o) => /size/i.test(o.name ?? ''));
-  const sizes = (sizeOption?.choices ?? [])
-    .map((c) => tidyName(c.value ?? ''))
-    .filter(Boolean);
+  const sized: Array<{ size: string; id: string; price: number | null }> = [];
+  for (const v of p.variants) {
+    const choice = v.choices.find((c) => /size/i.test(c.option))?.choice;
+    const size = choice ? tidyName(choice) : '';
+    if (size) sized.push({ size, id: v.id, price: v.price });
+  }
 
-  if (sizes.length === 0) {
+  if (sized.length === 0) {
+    const only = p.variants[0];
     return [{
       productId: p.id,
       productName,
       size: 'One size',
       variantId: null,
-      price: basePrice,
+      inventoryVariantId: only?.id ?? null,
+      price: only?.price ?? 0,
     }];
   }
 
-  return sizes.map((size) => {
-    const match = (p.variants ?? []).find((v) =>
-      Object.values(v.choices ?? {}).some((c) => tidyName(c).toLowerCase() === size.toLowerCase())
-    );
-    return {
+  // First variant wins when a size repeats (e.g. size x colour), as the
+  // V1 lookup did.
+  const seen = new Set<string>();
+  const entries: CatalogueEntry[] = [];
+  for (const x of sized) {
+    const k = x.size.toLowerCase();
+    if (seen.has(k)) continue;
+    seen.add(k);
+    entries.push({
       productId: p.id,
       productName,
-      size,
-      variantId: match?.id ?? null,
-      price: match?.variant?.priceData?.price ?? basePrice,
-    };
-  });
+      size: x.size,
+      variantId: x.id,
+      inventoryVariantId: x.id,
+      price: x.price ?? 0,
+    });
+  }
+  return entries;
 }
 
 export async function GET(req: NextRequest) {
@@ -212,97 +202,83 @@ export async function GET(req: NextRequest) {
   // when the catalogue in the API disagrees with the live shop.
   const raw = req.nextUrl.searchParams.get('raw') === '1';
 
-  const res = await fetch('https://www.wixapis.com/stores/v1/products/query', {
-    method: 'POST',
-    headers: {
-      Authorization: process.env.WIX_API_KEY,
-      'wix-site-id': process.env.WIX_SITE_ID,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ query: { paging: { limit: 100 } }, includeVariants: true }),
-    // See lib/no-store-fetch.ts for why this matters in this codebase:
-    // Next's Data Cache has served stale responses to routes that
-    // looked dynamic. This is a POST so it should not be cached, but
-    // the cost of being explicit is nil and it removes one suspect when
-    // the catalogue looks out of date.
-    cache: 'no-store',
-  });
-
-  if (!res.ok) {
-    const detail = await res.text();
-    return json({ error: `Wix returned ${res.status}`, detail: detail.slice(0, 400) }, 502);
+  let catalogue;
+  try {
+    catalogue = await loadCatalogueV3();
+  } catch (e) {
+    if (e instanceof WixV3Error) {
+      return json({ error: `Wix returned ${e.status}`, where: e.where, detail: e.detail }, 502);
+    }
+    throw e;
   }
-
-  const data = await res.json();
-  const products: WixProduct[] = data.products ?? [];
+  const { products } = catalogue;
 
   if (raw) {
+    // ?raw=1 shows what Wix actually sent for ONE product, so the V3
+    // shape can be read rather than assumed. ?product= takes an id or
+    // part of a name; with none, the first product is used.
+    const want = (req.nextUrl.searchParams.get('product') ?? '').toLowerCase();
+    const idx = want
+      ? catalogue.rawProducts.findIndex(
+          (p) => String(p.id).toLowerCase() === want || String(p.name ?? '').toLowerCase().includes(want)
+        )
+      : 0;
+    const rawProduct = idx >= 0 ? catalogue.rawProducts[idx] : null;
+    const pid: string | undefined = rawProduct?.id;
     return json({
       ok: true,
       fetchedAt: new Date().toISOString(),
-      productsFound: products.length,
-      products: products.map((p) => ({
-        name: p.name,
-        id: p.id,
-        lastUpdated: p.lastUpdated ?? '(not returned)',
-        manageVariants: p.manageVariants ?? '(not returned)',
-        sizeChoices:
-          (p.productOptions ?? [])
-            .filter((o) => /size/i.test(o.name ?? ''))
-            .flatMap((o) => (o.choices ?? []).map((c) => c.value)) ?? [],
-        variantsReturned: (p.variants ?? []).length,
-        variants: (p.variants ?? []).map((v) => ({
-          id: v.id,
-          choices: v.choices ?? {},
-        })),
-      })),
-    });
-  }
-
-  // Wix stock, read from the inventory API - the same call
-  // lib/wix-push.ts makes. A failure here must not fail the import:
-  // linking and prices are the job, quantities are commentary, so the
-  // report says the read failed and carries on with nulls.
-  const invByProduct = new Map<string, WixInventoryItem>();
-  let wixStockError: string | null = null;
-  let wixStockTruncated = false;
-  {
-    const invRes = await fetch('https://www.wixapis.com/stores/v2/inventoryItems/query', {
-      method: 'POST',
-      headers: {
-        Authorization: process.env.WIX_API_KEY,
-        'wix-site-id': process.env.WIX_SITE_ID,
-        'Content-Type': 'application/json',
+      counts: {
+        products: catalogue.rawProducts.length,
+        variants: catalogue.rawVariants.length,
+        inventoryItems: catalogue.rawInventory.length,
       },
-      body: JSON.stringify({ query: { paging: { limit: 100 } } }),
-      cache: 'no-store',
+      ...(catalogue.inventoryError ? { inventoryError: catalogue.inventoryError } : {}),
+      productNames: catalogue.rawProducts.map((p) => p.name),
+      shownProduct: rawProduct ? { id: pid, name: rawProduct.name } : `no product matched "${want}"`,
+      rawProduct,
+      rawVariants: catalogue.rawVariants.filter((v) => v.productData?.productId === pid),
+      rawInventoryItems: catalogue.rawInventory.filter((i) => i.productId === pid),
     });
-    if (!invRes.ok) {
-      wixStockError = `Wix inventory returned ${invRes.status}`;
-    } else {
-      const invData = await invRes.json();
-      const items: WixInventoryItem[] = invData.inventoryItems ?? [];
-      // One page only, matching the catalogue read above. Said out loud
-      // rather than left for someone to discover as missing rows.
-      wixStockTruncated = items.length >= 100;
-      for (const i of items) if (i.productId) invByProduct.set(i.productId, i);
-    }
   }
 
-  // Wix's id for "this product has no variants".
-  const NO_VARIANT = '00000000-0000-0000-0000-000000000000';
+  if (!dryRun && !V3_WRITES_ENABLED) {
+    return json(
+      {
+        error:
+          'The real import is switched off while it moves to Catalog V3. Run with ?dryRun=1, review it, and it will be switched back on deliberately.',
+      },
+      409
+    );
+  }
+
+  // Wix stock, from V3 inventory items (one per variant per location).
+  // A failure here must not fail the import: linking and prices are the
+  // job, quantities are commentary, so the report says the read failed
+  // and carries on with nulls.
+  const wixStockError: string | null = catalogue.inventoryError;
+  const invByVariant = new Map<string, { quantity: number | null; tracked: boolean | null }>();
+  const locationIds = new Set<string>();
+  for (const i of catalogue.rawInventory as RawInventoryItem[]) {
+    if (!i.productId || !i.variantId) continue;
+    if (i.locationId) locationIds.add(i.locationId);
+    const key = `${i.productId}::${i.variantId}`;
+    const q = typeof i.quantity === 'number' ? i.quantity : null;
+    const prev = invByVariant.get(key);
+    // More than one location sums, so the figure is the whole shop's;
+    // wixLocations is reported so that is visible, not assumed.
+    invByVariant.set(key, {
+      quantity: q === null ? (prev?.quantity ?? null) : (prev?.quantity ?? 0) + q,
+      tracked: typeof i.trackQuantity === 'boolean' ? i.trackQuantity : (prev?.tracked ?? null),
+    });
+  }
 
   function wixStockFor(productId: string, variantId: string | null) {
-    const item = invByProduct.get(productId);
-    if (!item) return { wixQuantity: null, wixTracked: null };
-    const v = (item.variants ?? []).find((x) => x.variantId === (variantId ?? NO_VARIANT));
-    return {
-      // A tracked product with no matching variant row reads as null,
-      // not 0: "Wix did not tell us" and "Wix says none left" are
-      // different answers and only one of them is a count.
-      wixQuantity: typeof v?.quantity === 'number' ? v.quantity : null,
-      wixTracked: item.trackQuantity ?? null,
-    };
+    const item = variantId ? invByVariant.get(`${productId}::${variantId}`) : undefined;
+    // No inventory item reads as null, not 0: "Wix did not tell us" and
+    // "Wix says none left" are different answers and only one of them
+    // is a count.
+    return { wixQuantity: item?.quantity ?? null, wixTracked: item?.tracked ?? null };
   }
 
   const supabase = createAdminSupabase();
@@ -350,10 +326,10 @@ export async function GET(req: NextRequest) {
   // id Wix returned so this is visible rather than inferred.
   const liveVariantIds = new Set<string>();
   for (const p of products) {
-    for (const v of p.variants ?? []) if (v.id) liveVariantIds.add(v.id);
+    for (const v of p.variants) liveVariantIds.add(`${p.id}::${v.id}`);
   }
   const staleVariantIds = rows
-    .filter((r) => r.wix_variant_id && !liveVariantIds.has(r.wix_variant_id))
+    .filter((r) => r.wix_variant_id && !liveVariantIds.has(`${r.wix_product_id}::${r.wix_variant_id}`))
     .map((r) => `${r.name} / ${r.size}: ${r.wix_variant_id}`);
 
   // A linked row whose tracker name no longer matches its Wix product.
@@ -367,7 +343,7 @@ export async function GET(req: NextRequest) {
   const nameDrift: Array<Record<string, string>> = [];
   {
     const wixNameById = new Map<string, string>();
-    for (const p of products) wixNameById.set(p.id, tidyName(p.name ?? ''));
+    for (const p of products) wixNameById.set(p.id, tidyName(p.name));
     const reported = new Set<string>();
     for (const r of rows) {
       if (!r.wix_product_id) continue;
@@ -393,7 +369,7 @@ export async function GET(req: NextRequest) {
   // the reason this exists.
   const wixStock: Array<Record<string, unknown>> = [];
   for (const p of products) {
-    const productName = tidyName(p.name ?? '');
+    const productName = tidyName(p.name);
     if (!productName || looksLikeAFee(productName)) continue;
     for (const e of catalogueEntries(p)) {
       const tracker =
@@ -403,7 +379,7 @@ export async function GET(req: NextRequest) {
       wixStock.push({
         product: e.productName,
         size: e.size,
-        ...wixStockFor(e.productId, e.variantId),
+        ...wixStockFor(e.productId, e.inventoryVariantId),
         trackerLine: tracker ? `${tracker.name} / ${tracker.size}` : null,
         trackerOnHand: tracker ? tracker.quantity : null,
         productId: e.productId,
@@ -465,7 +441,7 @@ export async function GET(req: NextRequest) {
   const updates: Array<{ id: string; patch: Record<string, unknown>; label: string }> = [];
 
   for (const p of products) {
-    const productName = tidyName(p.name ?? '');
+    const productName = tidyName(p.name);
     if (!productName) continue;
     if (looksLikeAFee(productName)) {
       skippedAsFees.push(productName);
@@ -477,13 +453,8 @@ export async function GET(req: NextRequest) {
     if (dryRun && entries.some((e) => e.variantId === null) && wixDiagnostics.length < 4) {
       wixDiagnostics.push({
         product: productName,
-        manageVariants: p.manageVariants ?? '(field absent from response)',
-        sizeOptionsFound: (p.productOptions ?? []).map((o) => ({
-          option: o.name,
-          choices: (o.choices ?? []).map((c) => c.value),
-        })),
-        variantsReturned: (p.variants ?? []).length,
-        firstVariantRaw: (p.variants ?? [])[0] ?? null,
+        variantsReturned: p.variants.length,
+        firstVariant: p.variants[0] ?? null,
       });
     }
 
@@ -508,7 +479,7 @@ export async function GET(req: NextRequest) {
           // header. The Wix figure rides along so the person reading
           // the report can see what they would be signing up to.
           on_hand: 0,
-          ...wixStockFor(entry.productId, entry.variantId),
+          ...wixStockFor(entry.productId, entry.inventoryVariantId),
           wix_product_id: entry.productId,
           wix_variant_id: entry.variantId,
         });
@@ -548,7 +519,7 @@ export async function GET(req: NextRequest) {
         name: existing.name,
         size: existing.size,
         on_hand: existing.quantity,
-        ...wixStockFor(entry.productId, entry.variantId),
+        ...wixStockFor(entry.productId, entry.inventoryVariantId),
         ...(patch.wix_product_id !== undefined
           ? { wix_product_id: `${existing.wix_product_id ?? '(none)'} -> ${entry.productId}` }
           : {}),
@@ -608,7 +579,7 @@ export async function GET(req: NextRequest) {
     nameDrift,
     wixStock,
     ...(wixStockError ? { wixStockError } : {}),
-    ...(wixStockTruncated ? { wixStockTruncated: 'Wix returned a full page of inventory items; some may be missing.' } : {}),
+    wixLocations: locationIds.size,
     failed,
   });
 }

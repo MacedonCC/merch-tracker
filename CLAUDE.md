@@ -417,6 +417,17 @@ rather than editing it). Write a new migration instead.
 
 ### Wix catalogue import (`app/api/wix-import/route.ts`)
 
+**Catalog V3 (6 Oct 2026).** Wix moved the store to Catalog V3, so the V1
+product read and V2 inventory read below answer 501. The catalogue
+read now lives in `lib/wix-catalogue-v3.ts` (products, variants and
+inventory items are three separate V3 calls). `wix-import` and
+`wix-media` are **dry-run only** (`V3_WRITES_ENABLED = false`) until a V3
+dry run has been read, because Wix's docs do not say whether variant ids
+survived the conversion — `staleVariantIds` is the test. The push
+(`lib/wix-push.ts`) is not ported and `WIX_PUSH_ENABLED` stays off.
+`?raw=1&product=<name or id>` on wix-import shows one product's real V3
+response. Some prose below still describes the V1/V2 shapes.
+
 Reconciles the Wix catalogue against `stock_items`: links existing lines
 to their Wix product/variant, brings prices across, and creates a line
 at `quantity 0` for any Wix size the tracker lacks. **`?dryRun=1`
