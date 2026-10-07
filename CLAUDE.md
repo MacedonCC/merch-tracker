@@ -423,8 +423,13 @@ read now lives in `lib/wix-catalogue-v3.ts` (products, variants and
 inventory items are three separate V3 calls). `wix-import` and
 `wix-media` are **dry-run only** (`V3_WRITES_ENABLED = false`) until a V3
 dry run has been read, because Wix's docs do not say whether variant ids
-survived the conversion — `staleVariantIds` is the test. The push
-(`lib/wix-push.ts`) is not ported and `WIX_PUSH_ENABLED` stays off.
+survived the conversion — `staleVariantIds` is the test (the 7 Oct V3 dry
+run was clean: ids intact). The push (`lib/wix-push.ts`) is ported to
+the V3 bulk inventory update (read revision, set absolute quantity,
+single location only) but its write path has never run and is held off
+by `V3_PUSH_WRITES_VERIFIED = false` as well as `WIX_PUSH_ENABLED`; the
+preview (GET `/api/wix-push`) reports flags and `warnings`. Import-then-
+push ordering is unchanged.
 `?raw=1&product=<name or id>` on wix-import shows one product's real V3
 response. Some prose below still describes the V1/V2 shapes.
 
