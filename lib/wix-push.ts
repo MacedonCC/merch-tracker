@@ -47,7 +47,7 @@ import { fetchInventoryV3, WixV3Error } from '@/lib/wix-catalogue-v3';
 //                  whole shop while the V3 write path is being tried.
 // 'all'            normal operation, once a single-product test has been
 //                  checked in Wix and in the shop.
-const V3_PUSH_WRITES: 'off' | 'single-product' | 'all' = 'single-product';
+const V3_PUSH_WRITES: 'off' | 'single-product' | 'all' = 'all';
 
 const WIX_API = 'https://www.wixapis.com';
 
