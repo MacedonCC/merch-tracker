@@ -420,6 +420,27 @@ export default function TrackerSection({
 
   useEffect(() => { load(); }, []);
 
+  // A phone keeps the page alive in the background, so without this the
+  // lists stay as they were when the app was last opened. Refetch when the
+  // tab becomes visible or the page is restored from the back/forward
+  // cache. visibilitychange and pageshow can fire together, hence the
+  // in-flight guard.
+  const refreshing = useRef(false);
+  useEffect(() => {
+    async function refresh() {
+      if (document.visibilityState !== 'visible' || refreshing.current) return;
+      refreshing.current = true;
+      try { await load(); } finally { refreshing.current = false; }
+    }
+    function onPageShow(e: PageTransitionEvent) { if (e.persisted) refresh(); }
+    document.addEventListener('visibilitychange', refresh);
+    window.addEventListener('pageshow', onPageShow);
+    return () => {
+      document.removeEventListener('visibilitychange', refresh);
+      window.removeEventListener('pageshow', onPageShow);
+    };
+  }, []);
+
   function flash(t: string) {
     setMessage(t);
     setTimeout(() => setMessage(''), 4000);
@@ -567,10 +588,11 @@ export default function TrackerSection({
               `${result.reason} ${rc.wouldBlock} blocked, ${rc.newlyTracked} newly tracked` +
               (rc.failed ? `, ${rc.failed} FAILED.` : '.')
       );
-      load();
     } catch {
       setPushSummary('Could not reach Wix.');
     } finally {
+      // Whatever the outcome, the import may have added orders.
+      load();
       setPushing(false);
     }
   }
