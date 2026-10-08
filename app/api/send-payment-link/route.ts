@@ -52,6 +52,7 @@ export async function POST(req: NextRequest) {
   if (!orderId) return ok({ sent: false, reason: 'No order was given.' });
 
   if (!process.env.GMAIL_USER || !process.env.GMAIL_APP_PASSWORD) {
+    console.error('send-payment-link: GMAIL_USER or GMAIL_APP_PASSWORD is not set');
     return ok({ sent: false, reason: 'Email is not configured.' });
   }
 
@@ -61,11 +62,14 @@ export async function POST(req: NextRequest) {
   const supabase = createServerSupabase();
   const { data: order, error } = await supabase
     .from('orders')
-    .select('id, customer_name, customer_email, quantity, unit_price, distributed_at, stock_items(name, size, wix_product_url)')
+    .select('id, customer_name, customer_email, quantity, unit_price, distributed_at, stock_items!stock_item_id(name, size, wix_product_url)')
     .eq('id', orderId)
     .maybeSingle();
 
-  if (error || !order) return ok({ sent: false, reason: 'Could not find that order.' });
+  if (error || !order) {
+    console.error('send-payment-link: order lookup failed', { orderId, error });
+    return ok({ sent: false, reason: 'Could not find that order.' });
+  }
 
   // Supabase types an embedded row as an array when it cannot prove the
   // relationship is to-one, so accept either shape.
@@ -133,6 +137,7 @@ export async function POST(req: NextRequest) {
     return ok({ sent: true });
   } catch (e) {
     const reason = e instanceof Error ? e.message : 'Sending failed.';
+    console.error('send-payment-link: send failed', { orderId, reason });
     return ok({ sent: false, reason });
   }
 }
