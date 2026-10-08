@@ -600,6 +600,12 @@ export default function TrackerSection({
     setModal('handover');
   }
 
+  // Money still owed on the unpaid orders among `ids`; 0 when all are paid.
+  const owedOn = (ids: string[]) =>
+    orders
+      .filter((o) => ids.includes(o.id) && o.payment_status !== 'paid')
+      .reduce((sum, o) => sum + o.quantity * Number(o.unit_price), 0);
+
   async function saveHandover(form: HTMLFormElement) {
     if (!handoverForm) return;
     const f = new FormData(form);
@@ -1266,7 +1272,7 @@ export default function TrackerSection({
                           {(o.stock_item_id ? byId.get(o.stock_item_id)?.on_hand : 0) ?? 0} in stock
                         </span>
                       )}
-                      {state === 'done' && permissions.can_undo_handover && (
+                      {(state === 'done' || state === 'owing') && permissions.can_undo_handover && (
                         <button className="btn-mini btn-quiet" onClick={() => undoHandover(o.id)}>Undo</button>
                       )}
                     </td>
@@ -1274,7 +1280,8 @@ export default function TrackerSection({
                       <RowMenu
                         actions={[
                           ...(state === 'done' ? [{ label: 'Edit handover', onClick: () => openHandoverModal([o.id], o) }] : []),
-                          ...(isAdmin && (state === 'ready' || state === 'waiting')
+                          ...(state === 'unpaid' ? [{ label: 'Hand over', onClick: () => openHandoverModal([o.id]) }] : []),
+                          ...(isAdmin && (state === 'ready' || state === 'waiting' || state === 'unpaid')
                             ? [{ label: 'Hand over a different size', onClick: () => openSubstituteModal(o) }]
                             : []),
                           ...(isAdmin && o.source === 'manual' && o.payment_status === 'pending' && o.customer_email
@@ -1342,6 +1349,11 @@ export default function TrackerSection({
         <div className="overlay" onClick={(e) => e.target === e.currentTarget && setModal(null)}>
           <form className="modal" onSubmit={(e) => { e.preventDefault(); saveHandover(e.currentTarget); }}>
             <h3>{handoverForm.ids.length > 1 ? `Hand over ${handoverForm.ids.length} items` : 'Hand over'}</h3>
+            {owedOn(handoverForm.ids) > 0 && (
+              <p className="sell-error" role="alert">
+                Not paid yet: {money(owedOn(handoverForm.ids))} still owed
+              </p>
+            )}
             <div className="field"><label>Date handed over</label>
               <input name="date" type="date" defaultValue={handoverForm.date} autoFocus /></div>
             <div className="field"><label>Initials</label>
@@ -1364,6 +1376,11 @@ export default function TrackerSection({
               Stock comes off the size actually given, not the size ordered. The order keeps its
               original size on record.
             </p>
+            {owedOn([substituteForm.id]) > 0 && (
+              <p className="sell-error" role="alert">
+                Not paid yet: {money(owedOn([substituteForm.id]))} still owed
+              </p>
+            )}
             <div className="field"><label>Size actually given</label>
               <select name="given" defaultValue={substituteForm.givenId} autoFocus>
                 {substituteForm.options.map((s) => (
