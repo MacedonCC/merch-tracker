@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import nodemailer from 'nodemailer';
-import { getCurrentMember } from '@/lib/member';
+import { getCurrentMember, requireAdmin } from '@/lib/member';
 import { createServerSupabase } from '@/lib/supabase-server';
 import {
   LOGO_CID,
@@ -30,6 +30,9 @@ export const maxDuration = 30;
 
 interface Body {
   orderId?: string;
+  // Set by the Orders page's "Resend payment link": admin only, and only
+  // for an order that is still unpaid.
+  resend?: boolean;
 }
 
 type Result =
@@ -41,14 +44,15 @@ function ok(result: Result) {
 }
 
 export async function POST(req: NextRequest) {
-  const member = await getCurrentMember();
+  const body = (await req.json().catch(() => ({}))) as Body;
+  const { orderId, resend } = body;
+  const member = resend ? await requireAdmin() : await getCurrentMember();
   if (!member) {
     // The only genuine error status here: the caller is not a committee
     // member, so they should not be sending club email at all.
     return NextResponse.json({ error: 'Not authorised' }, { status: 401 });
   }
 
-  const { orderId } = (await req.json().catch(() => ({}))) as Body;
   if (!orderId) return ok({ sent: false, reason: 'No order was given.' });
 
   if (!process.env.GMAIL_USER || !process.env.GMAIL_APP_PASSWORD) {
@@ -62,7 +66,7 @@ export async function POST(req: NextRequest) {
   const supabase = createServerSupabase();
   const { data: order, error } = await supabase
     .from('orders')
-    .select('id, customer_name, customer_email, quantity, unit_price, distributed_at, stock_items!stock_item_id(name, size, wix_product_url)')
+    .select('id, customer_name, customer_email, quantity, unit_price, distributed_at, payment_status, source, stock_items!stock_item_id(name, size, wix_product_url)')
     .eq('id', orderId)
     .maybeSingle();
 
@@ -78,8 +82,24 @@ export async function POST(req: NextRequest) {
     | { name: string; size: string; wix_product_url: string | null }
     | undefined;
 
-  if (!order.customer_email) return ok({ sent: false, reason: 'No email address on the order.' });
-  if (!item?.wix_product_url) return ok({ sent: false, reason: 'This item has no shop page.' });
+  if (resend && (order.payment_status !== 'pending' || order.source !== 'manual')) {
+    return ok({ sent: false, reason: 'Only unpaid orders from /sell can be resent.' });
+  }
+  // Best-effort: remembering the outcome must never turn a sent email
+  // into a reported failure.
+  const record = async (patch: { email_sent_at?: string; email_error: string | null }) => {
+    const { error: recordError } = await supabase.from('orders').update(patch).eq('id', orderId);
+    if (recordError) console.error('send-payment-link: could not record result', { orderId, recordError });
+  };
+
+  if (!order.customer_email) {
+    await record({ email_error: 'No email address on the order.' });
+    return ok({ sent: false, reason: 'No email address on the order.' });
+  }
+  if (!item?.wix_product_url) {
+    await record({ email_error: 'This item has no shop page.' });
+    return ok({ sent: false, reason: 'This item has no shop page.' });
+  }
 
   // The logo is attached by CID rather than linked, since most clients
   // block remote images by default. Reading it is best-effort: files in
@@ -134,10 +154,12 @@ export async function POST(req: NextRequest) {
         : [],
     });
 
+    await record({ email_sent_at: new Date().toISOString(), email_error: null });
     return ok({ sent: true });
   } catch (e) {
     const reason = e instanceof Error ? e.message : 'Sending failed.';
     console.error('send-payment-link: send failed', { orderId, reason });
+    await record({ email_error: reason });
     return ok({ sent: false, reason });
   }
 }

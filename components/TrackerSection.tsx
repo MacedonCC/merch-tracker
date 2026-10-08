@@ -118,6 +118,9 @@ interface OrderRow {
   handed_over_by: string | null;
   handover_note: string | null;
   source: 'manual' | 'wix';
+  payment_method?: 'cash' | 'online' | 'unknown';
+  email_sent_at?: string | null;
+  email_error?: string | null;
   ordered_at: string;
   notes: string | null;
   stock_items?: { name: string; size: string } | null;
@@ -688,6 +691,25 @@ export default function TrackerSection({
     load();
   }
 
+  // Admin-only. The server re-reads the order and rebuilds the same email
+  // /sell sends (including the "taken now" wording from distributed_at);
+  // the address is shown here so it can be checked before anything goes.
+  async function resendLink(o: OrderRow) {
+    if (!window.confirm(`Email the payment link for ${o.customer_name} to ${o.customer_email}?`)) return;
+    try {
+      const res = await fetch('/api/send-payment-link', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ orderId: o.id, resend: true }),
+      });
+      const result = await res.json();
+      flash(result.sent ? `Payment link emailed to ${o.customer_email}.` : `Not sent: ${result.reason ?? result.error ?? 'Sending failed.'}`);
+    } catch {
+      flash('Not sent: no connection.');
+    }
+    load();
+  }
+
   async function removeOrder(id: string) {
     if (!confirm('Remove this order?')) return;
     const { error } = await supabase.from('orders').delete().eq('id', id);
@@ -1178,6 +1200,16 @@ export default function TrackerSection({
                     <td className="orders-who">
                       <strong>{o.customer_name}</strong>
                       <div>{o.customer_email ?? o.reference}</div>
+                      {o.email_sent_at && !o.email_error && (
+                        <div style={{ fontSize: '0.75rem', color: 'var(--ink-faint)' }}>
+                          Link emailed {new Date(o.email_sent_at).toLocaleDateString('en-AU', { day: 'numeric', month: 'numeric' })}
+                        </div>
+                      )}
+                      {o.email_error && (
+                        <div style={{ fontSize: '0.75rem', color: 'var(--danger, #b3261e)' }}>
+                          Link not sent: {o.email_error}
+                        </div>
+                      )}
                     </td>
                     <td className="orders-qty">{o.quantity}</td>
                     <td className="orders-item">{orderItemLabel(o)}</td>
@@ -1244,6 +1276,9 @@ export default function TrackerSection({
                           ...(state === 'done' ? [{ label: 'Edit handover', onClick: () => openHandoverModal([o.id], o) }] : []),
                           ...(isAdmin && (state === 'ready' || state === 'waiting')
                             ? [{ label: 'Hand over a different size', onClick: () => openSubstituteModal(o) }]
+                            : []),
+                          ...(isAdmin && o.source === 'manual' && o.payment_status === 'pending' && o.customer_email
+                            ? [{ label: 'Resend payment link', onClick: () => resendLink(o) }]
                             : []),
                           ...(isAdmin ? [{ label: 'Remove', onClick: () => removeOrder(o.id) }] : []),
                         ]}
