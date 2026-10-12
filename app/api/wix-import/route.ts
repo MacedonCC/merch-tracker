@@ -47,11 +47,12 @@ import { loadCatalogueV3, WixV3Error, type CatProduct, type RawInventoryItem } f
 // CATALOGUE V3. Wix moved the store to Catalog V3 (6 Oct 2026); the V1
 // product read and V2 inventory read this route used answer 501. The
 // read side now goes through lib/wix-catalogue-v3.ts. The write side
-// below is switched off (V3_WRITES_ENABLED) until a V3 dry run has been
-// read and approved, because whether Wix kept the old variant ids is not
-// documented - staleVariantIds in the dry run is the test. Do not turn
-// it on before that has been looked at.
-const V3_WRITES_ENABLED = false;
+// below was held off (V3_WRITES_ENABLED) until a V3 dry run had been
+// read, because whether Wix kept the old variant ids is not documented -
+// staleVariantIds in the dry run is the test. Dry runs on 7 Oct and 12 Oct
+// 2026 were clean, so writes were enabled on 12 Oct 2026. The guards are
+// unchanged: no quantity write on existing rows (the database refuses it).
+const V3_WRITES_ENABLED = true;
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
