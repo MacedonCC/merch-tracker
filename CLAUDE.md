@@ -462,6 +462,16 @@ test for "short" read "Juniors Coloured Playing Shirts Short Sleeve
 Testing `shirt` before `short` would fix that one name and break the
 next product that mentions both.
 
+**Retired lines (`retired_at` set) take no part in matching** — not by
+variant id, product id or name — and are left out of `staleVariantIds`
+and `nameDrift`. A retired row can keep its `wix_product_id` (wix-sync
+finds its past orders through it), and when that product gains sizes
+the retired row is the only holder of the id, which is exactly what the
+product-id fallback binds to: the unsized "Girl's and Women's Training
+Top" was about to become L14 of its renamed successor. A Wix size whose
+name + size only a retired line answers to is reported in `conflicts`
+and not created, since `(name, size)` is unique across retired rows too.
+
 Matching is by name + size via `nameSizeKey()` in `lib/types.ts`, shared
 with `wix-sync`'s fallback so the two cannot drift. A size that imports
 under one spelling and syncs under another would create a line that

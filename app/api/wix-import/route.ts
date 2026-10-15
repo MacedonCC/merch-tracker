@@ -66,6 +66,7 @@ interface StockRow {
   wix_product_id: string | null;
   wix_variant_id: string | null;
   wix_listed_at: string | null;
+  retired_at: string | null;
 }
 
 /** One Wix catalogue entry: a product/size pair and what it costs. */
@@ -285,9 +286,25 @@ export async function GET(req: NextRequest) {
   const supabase = createAdminSupabase();
   const { data: stock } = await supabase
     .from('stock_items')
-    .select('id, name, size, price, quantity, wix_product_id, wix_variant_id, wix_listed_at');
+    .select('id, name, size, price, quantity, wix_product_id, wix_variant_id, wix_listed_at, retired_at');
 
-  const rows = (stock ?? []) as StockRow[];
+  // Retired lines take no part in matching, by any route. A retired row
+  // may keep its wix_product_id (wix-sync finds its past orders through
+  // it), and when a product gains sizes that row is the only one holding
+  // the id - exactly what the product-id fallback binds to. That is how
+  // the unsized "Girl's and Women's Training Top" was about to become
+  // the L14 of its renamed, sized successor. They are left out of the
+  // stale-id and name-drift reports too: nothing is matched through them.
+  const allRows = (stock ?? []) as StockRow[];
+  const rows = allRows.filter((r) => !r.retired_at);
+
+  // (name, size) is unique across retired rows too, so a Wix size that
+  // only a retired line answers to cannot be created: it is reported as
+  // a conflict instead, rather than failing the whole bulk insert.
+  const retiredByKey = new Map<string, StockRow>();
+  for (const r of allRows) {
+    if (r.retired_at) retiredByKey.set(nameSizeKey(r.name, r.size), r);
+  }
 
   // MATCH ORDER: variant id, then product id, then name + size.
   //
@@ -472,6 +489,13 @@ export async function GET(req: NextRequest) {
       const existing = findRow(entry);
 
       if (!existing) {
+        const retired = retiredByKey.get(key);
+        if (retired) {
+          conflicts.push(
+            `${entry.productName} / ${entry.size}: only matches retired line "${retired.name} / ${retired.size}" - not created`
+          );
+          continue;
+        }
         toCreate.push({
           name: entry.productName,
           size: entry.size,
