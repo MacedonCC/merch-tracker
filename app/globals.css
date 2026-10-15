@@ -767,6 +767,18 @@ button.matrix-line:hover { background-color: var(--tint); }
 }
 .sell-suggest-item:active { border-color: var(--accent); }
 
+/* Juniors | Seniors on the "who" step: two thumb-sized halves. */
+.sell-group { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.sell-group-btn {
+  min-height: 52px; font: inherit; font-size: 1.05rem; font-weight: 600; cursor: pointer;
+  border-radius: var(--radius); border: 1px solid var(--line-strong);
+  background-color: var(--paper); background-image: var(--sheen); color: var(--ink-soft);
+}
+.sell-group-btn[data-active="true"] {
+  background-color: var(--accent); background-image: var(--sheen-on-accent);
+  border-color: var(--accent); color: #fff;
+}
+
 /* Buttons. sell-big is the thumb-sized variant used for anything that
    commits a sale. */
 .sell-primary, .sell-secondary {
@@ -954,4 +966,47 @@ th.num, td.num { text-align: right; }
 @media (max-width: 600px) {
   .match-sides { grid-template-columns: 1fr; }
   .match-actions button { min-height: 44px; }
+}
+
+/* Orders: Juniors | Seniors | Unassigned | All. Four equal segments so
+   it is the same shape at every width, down to a 320px phone. */
+.group-switch {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px;
+  padding: 0.9rem 1.15rem 0;
+}
+.group-switch-btn {
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+  min-height: 44px; padding: 6px 4px; border-radius: 999px; cursor: pointer;
+  font-size: 0.82rem; font-weight: 500; white-space: nowrap;
+  border: 1px solid var(--line-strong);
+  background-color: var(--wash); background-image: var(--sheen); color: var(--ink-soft);
+}
+.group-switch-btn:hover { color: var(--ink); background-color: var(--paper); }
+.group-switch-btn[data-active="true"] {
+  background-color: var(--accent); background-image: var(--sheen-on-accent);
+  border-color: var(--accent); color: #fff; font-weight: 600;
+}
+.group-switch-count { font-variant-numeric: tabular-nums; opacity: 0.85; }
+/* Unassigned orders need sorting: amber count until there are none. */
+.group-switch-btn[data-attention="true"]:not([data-active="true"]) { border-color: var(--warn); }
+.group-switch-btn[data-attention="true"]:not([data-active="true"]) .group-switch-count { color: var(--warn); font-weight: 700; opacity: 1; }
+@media (max-width: 760px) {
+  .group-switch { padding: 0.75rem 0.9rem 0; gap: 4px; }
+  /* Count under the label, like the status chips: "Unassigned 29" on
+     one line does not fit a quarter of a 320px screen. */
+  .group-switch-btn { flex-direction: column; gap: 0; border-radius: var(--radius); font-size: 0.72rem; line-height: 1.2; min-height: 48px; }
+  .group-switch-count { font-size: 0.95rem; font-weight: 700; }
+}
+
+/* Juniors/Seniors and Wix # tags under a row's date. */
+.order-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 3px; justify-content: center; }
+.order-tag {
+  display: inline-block; padding: 1px 6px; border-radius: 999px;
+  font-size: 0.68rem; font-weight: 500; line-height: 1.5; white-space: nowrap;
+  background: var(--wash); color: var(--ink-soft); border: 1px solid var(--line);
+}
+.order-tag-juniors { background: var(--tint-ok); color: var(--stock-ok); border-color: transparent; }
+.order-tag-seniors { background: var(--tint-oversold); color: var(--stock-oversold); border-color: transparent; }
+@media (max-width: 760px) {
+  .order-tags { justify-content: flex-start; }
 }

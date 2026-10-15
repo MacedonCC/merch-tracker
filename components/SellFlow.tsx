@@ -77,6 +77,10 @@ export default function SellFlow({
   const [error, setError] = useState<string | null>(null);
   const [sale, setSale] = useState<Sale | null>(null);
   const [copied, setCopied] = useState(false);
+  // Juniors / Seniors: who manages this order's handover (orders.order_group).
+  // Defaults from the size each time one is picked; a label only, it
+  // changes nothing about stock or payment.
+  const [group, setGroup] = useState<'juniors' | 'seniors'>('seniors');
 
   // One tile per product name; each size is its own stock_items row.
   const products = useMemo(() => {
@@ -161,6 +165,7 @@ export default function SellFlow({
         payment_status: method === 'cash' ? 'paid' : 'pending',
         payment_method: method === 'cash' ? 'cash' : 'online',
         source: 'manual',
+        order_group: group,
         ordered_at: now,
       })
       .select('id')
@@ -172,8 +177,8 @@ export default function SellFlow({
       return;
     }
 
-    // Stock only moves on an UPDATE that sets distributed_at — there is
-    // no INSERT trigger on orders (see CLAUDE.md). Inserting with
+    // Stock only moves on an UPDATE that sets distributed_at — no INSERT
+    // trigger on orders moves stock (see CLAUDE.md). Inserting with
     // distributed_at already set would hand the garment over without
     // ever reducing stock, so the handover must be a second write.
     //
@@ -331,6 +336,7 @@ export default function SellFlow({
                     data-out={out}
                     onClick={() => {
                       setChosen(s);
+                      setGroup(/^JNR/i.test(s.size) ? 'juniors' : 'seniors');
                       setStep('who');
                     }}
                   >
@@ -399,6 +405,21 @@ export default function SellFlow({
               + Add email (optional)
             </button>
           )}
+
+          <div className="sell-group" role="group" aria-label="Juniors or Seniors">
+            {(['juniors', 'seniors'] as const).map((g) => (
+              <button
+                key={g}
+                type="button"
+                className="sell-group-btn"
+                data-active={group === g}
+                aria-pressed={group === g}
+                onClick={() => setGroup(g)}
+              >
+                {g === 'juniors' ? 'Juniors' : 'Seniors'}
+              </button>
+            ))}
+          </div>
 
           <button
             className="sell-primary sell-big"

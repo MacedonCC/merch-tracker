@@ -110,7 +110,7 @@ export function buildReviewList(
 }
 
 const ORDER_COLUMNS =
-  'id, reference, customer_name, customer_email, stock_item_id, quantity, ordered_at, distributed_at, wix_order_id, notes';
+  'id, reference, customer_name, customer_email, stock_item_id, quantity, ordered_at, distributed_at, wix_order_id, wix_order_number, notes';
 
 export async function loadMatchInputs(db: SupabaseClient) {
   const [manualRes, wixRes, stockRes, dismissRes] = await Promise.all([

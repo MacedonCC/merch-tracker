@@ -35,8 +35,9 @@ import {
 // migration-002 isn't in this repo (see supabase/MIGRATIONS.md), but
 // the reasoning above has since been confirmed by reading the live
 // trigger definitions in Supabase: on_distribution_change is the only
-// stock-deducting trigger on `orders`, it is AFTER UPDATE, and there
-// is no INSERT trigger at all.
+// stock-deducting trigger on `orders`, it is AFTER UPDATE, and no
+// INSERT trigger moves stock. (The one INSERT trigger, added 15 Oct
+// 2026, only defaults order_group.)
 //
 // PERFORMANCE: this does exactly 3 Supabase calls total, regardless
 // of how many orders are imported — one read of existing (wix_order_id,
@@ -357,6 +358,8 @@ export async function runWixSync(opts: { limit?: number } = {}): Promise<SyncRes
         payment_method: 'online',
         source: 'wix',
         wix_order_id: order.id,
+        // Display and search only (Orders page); see migration 20261015000004.
+        wix_order_number: order.number ? String(order.number) : null,
         ordered_at: order.createdDate ?? new Date().toISOString(),
         distributed_at: distributedAt,
         notes: order.number ? `Wix order #${order.number}` : null,
@@ -403,6 +406,7 @@ export async function runWixSync(opts: { limit?: number } = {}): Promise<SyncRes
           p_wix_order_id: wix.wixOrderId,
           p_note: mergeNote(wix, manual.customerEmail),
           p_wix_row_id: null,
+          p_wix_order_number: wix.wixOrderNumber,
         });
         if (error) {
           paymentLinkErrors.push(`${manual.reference}: ${error.message}`);

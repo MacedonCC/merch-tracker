@@ -369,7 +369,9 @@ that began last August. Mar–Jul is the easy one to get wrong — it is
 the tail of the calendar year but the season has already finished.
 
 Stock quantity itself only changes via two triggers on `orders`, and
-**neither fires on INSERT** — stock moves on handover, not on sale
+**neither fires on INSERT** — stock moves on handover, not on sale.
+(`orders` does have one BEFORE INSERT trigger, `set_default_order_group`,
+but it only fills `order_group` and never touches stock)
 (moved there in migration-002, which isn't in this repo; see
 `supabase/MIGRATIONS.md`). `supabase/schema.sql` still shows the
 original INSERT/DELETE pair and is wrong about this, like the rest of
@@ -569,6 +571,23 @@ transaction-local `app.order_merge` flag.
   /api/payment-link-match`; dismissals in `payment_match_dismissals`).
   `GET /api/payment-link-match` with `CRON_SECRET` is a read-only dry
   run of the whole database.
+
+**Juniors / Seniors** (`orders.order_group`: `juniors | seniors | null`,
+migration `20261015000003`). Two people manage handovers. A label only:
+nothing about stock, payment or handover reads it, and any committee
+member can change it (Orders row ⋯ menu, per order or for all of a
+customer's open orders). New orders without a group get `juniors` for a
+JNR size from the `set_default_order_group` BEFORE INSERT trigger,
+otherwise unassigned; /sell always sends its own choice (defaulted from
+the size). A payment-link merge keeps the /sell order's group. The
+Orders page switch (Juniors | Seniors | Unassigned | All, remembered in
+localStorage) filters **after** `classifyOrders()` runs over every
+order: Ready vs Waiting is a queue per size across both groups, so
+classifying a filtered list would let one group claim stock the other
+is owed. **`orders.wix_order_number`** (migration `20261015000004`) is
+display and search only, set by wix-sync and by
+`merge_payment_link_order()`; nothing that matches or moves stock reads
+it.
 
 `orders.payment_method` is `cash | online | unknown`. Historical rows
 default to `unknown`; every Wix row is `online` (backfilled, and set on

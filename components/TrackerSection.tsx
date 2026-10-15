@@ -123,6 +123,12 @@ interface OrderRow {
   email_error?: string | null;
   ordered_at: string;
   notes: string | null;
+  // Who manages the handover; null = unassigned. A label only - see
+  // migration 20261015000003. Nothing that touches stock, payment or
+  // handover reads it.
+  order_group: OrderGroupName | null;
+  // Display and search only (migration 20261015000004).
+  wix_order_number: string | null;
   stock_items?: { name: string; size: string } | null;
   // Only present when a different size was handed over than was
   // ordered — see "Hand over a different size" below.
@@ -332,6 +338,41 @@ const CHIPS: { key: 'all' | OrderState; label: string }[] = [
   { key: 'all', label: 'All' },
 ];
 
+type OrderGroupName = 'juniors' | 'seniors';
+type GroupFilter = 'juniors' | 'seniors' | 'unassigned' | 'all';
+
+const GROUP_FILTERS: { key: GroupFilter; label: string }[] = [
+  { key: 'juniors', label: 'Juniors' },
+  { key: 'seniors', label: 'Seniors' },
+  { key: 'unassigned', label: 'Unassigned' },
+  { key: 'all', label: 'All' },
+];
+
+const GROUP_FILTER_KEY = 'ordersGroupFilter';
+
+function inGroup(o: OrderRow, f: GroupFilter): boolean {
+  if (f === 'all') return true;
+  if (f === 'unassigned') return o.order_group == null;
+  return o.order_group === f;
+}
+
+// The small tags under a row's date: Juniors/Seniors and the Wix order
+// number. Shared by the list and the grouped Ready view so the two
+// cannot drift.
+function OrderTags({ o }: { o: OrderRow }) {
+  if (!o.order_group && !o.wix_order_number) return null;
+  return (
+    <div className="order-tags">
+      {o.order_group && (
+        <span className={`order-tag order-tag-${o.order_group}`}>
+          {o.order_group === 'juniors' ? 'Juniors' : 'Seniors'}
+        </span>
+      )}
+      {o.wix_order_number && <span className="order-tag">Wix #{o.wix_order_number}</span>}
+    </div>
+  );
+}
+
 interface OrderGroup {
   key: string;
   name: string;
@@ -343,10 +384,14 @@ interface OrderGroup {
 // everything they're owed. A group of one renders identically to a
 // plain row (see the Ready view below) — this only changes how many
 // item lines and whether the button says "all".
+function customerKey(o: OrderRow): string {
+  return `${o.customer_name.trim().toLowerCase()}|${(o.customer_email ?? '').trim().toLowerCase()}`;
+}
+
 function groupByCustomer(orders: OrderRow[]): OrderGroup[] {
   const map = new Map<string, OrderGroup>();
   for (const o of orders) {
-    const key = `${o.customer_name.trim().toLowerCase()}|${(o.customer_email ?? '').trim().toLowerCase()}`;
+    const key = customerKey(o);
     const existing = map.get(key);
     if (existing) existing.items.push(o);
     else map.set(key, { key, name: o.customer_name, email: o.customer_email, items: [o] });
@@ -384,6 +429,19 @@ export default function TrackerSection({
   const [level, setLevel] = useState('');
   const [orderSearch, setOrderSearch] = useState('');
   const [orderChip, setOrderChip] = useState<'all' | OrderState>('ready');
+  // Remembered per device. Read after mount so the server render and
+  // the first client render agree; storage can be missing or throw.
+  const [groupFilter, setGroupFilterState] = useState<GroupFilter>('all');
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(GROUP_FILTER_KEY);
+      if (saved && GROUP_FILTERS.some((g) => g.key === saved)) setGroupFilterState(saved as GroupFilter);
+    } catch {}
+  }, []);
+  function setGroupFilter(f: GroupFilter) {
+    setGroupFilterState(f);
+    try { localStorage.setItem(GROUP_FILTER_KEY, f); } catch {}
+  }
   const [listedAt, setListedAt] = useState<Map<string, string | null>>(new Map());
   const [retired, setRetired] = useState<Set<string>>(new Set());
   const [showNoHistory, setShowNoHistory] = useState(false);
@@ -604,6 +662,39 @@ export default function TrackerSection({
     }
   }
 
+  // Juniors / Seniors. A plain column update any committee member may
+  // make; it changes nothing about stock, payment or handover.
+  async function setOrderGroup(ids: string[], group: OrderGroupName) {
+    const { error } = await supabase.from('orders').update({ order_group: group }).in('id', ids);
+    if (error) return flash(error.message);
+    const label = group === 'juniors' ? 'Juniors' : 'Seniors';
+    flash(ids.length === 1 ? `Set to ${label}.` : `${ids.length} orders set to ${label}.`);
+    load();
+  }
+
+  // "Set all for this customer": that customer's open orders, matched
+  // the same way the Ready view groups customers (name + email).
+  function customerOpenIds(o: OrderRow): string[] {
+    const key = customerKey(o);
+    return classifiedOrders
+      .filter((c) => c.state !== 'done' && customerKey(c.order) === key)
+      .map((c) => c.order.id);
+  }
+
+  function groupActions(o: OrderRow) {
+    const actions: { label: string; onClick: () => void }[] = [];
+    if (o.order_group !== 'juniors') actions.push({ label: 'Set to Juniors', onClick: () => setOrderGroup([o.id], 'juniors') });
+    if (o.order_group !== 'seniors') actions.push({ label: 'Set to Seniors', onClick: () => setOrderGroup([o.id], 'seniors') });
+    const ids = customerOpenIds(o);
+    if (ids.length > 1) {
+      actions.push(
+        { label: `Set all for this customer: Juniors (${ids.length})`, onClick: () => setOrderGroup(ids, 'juniors') },
+        { label: `Set all for this customer: Seniors (${ids.length})`, onClick: () => setOrderGroup(ids, 'seniors') },
+      );
+    }
+    return actions;
+  }
+
   async function markPaid(id: string) {
     await supabase.from('orders').update({ payment_status: 'paid' }).eq('id', id);
     flash('Marked as paid.');
@@ -821,19 +912,39 @@ export default function TrackerSection({
     state: orderStates.get(o.id) ?? 'unpaid',
   }));
 
+  // The group switch filters AFTER classification, never before: Ready
+  // vs Waiting is a queue across every order for a size, so classifying
+  // only the Juniors would let a Juniors order claim a shirt an earlier
+  // Seniors order is already owed.
+  const openCount = (f: GroupFilter) =>
+    classifiedOrders.filter((c) => c.state !== 'done' && inGroup(c.order, f)).length;
+  const groupCounts: Record<GroupFilter, number> = {
+    juniors: openCount('juniors'),
+    seniors: openCount('seniors'),
+    unassigned: openCount('unassigned'),
+    all: openCount('all'),
+  };
+  const groupedOrders = classifiedOrders.filter((c) => inGroup(c.order, groupFilter));
+
   const orderCounts = {
-    all: classifiedOrders.length,
-    unpaid: classifiedOrders.filter((c) => c.state === 'unpaid').length,
-    owing: classifiedOrders.filter((c) => c.state === 'owing').length,
-    ready: classifiedOrders.filter((c) => c.state === 'ready').length,
-    waiting: classifiedOrders.filter((c) => c.state === 'waiting').length,
-    done: classifiedOrders.filter((c) => c.state === 'done').length,
+    all: groupedOrders.length,
+    unpaid: groupedOrders.filter((c) => c.state === 'unpaid').length,
+    owing: groupedOrders.filter((c) => c.state === 'owing').length,
+    ready: groupedOrders.filter((c) => c.state === 'ready').length,
+    waiting: groupedOrders.filter((c) => c.state === 'waiting').length,
+    done: groupedOrders.filter((c) => c.state === 'done').length,
   };
 
-  const searchedOrders = classifiedOrders.filter(({ order: o }) => {
+  const searchedOrders = groupedOrders.filter(({ order: o }) => {
     const q = orderSearch.trim().toLowerCase();
     if (!q) return true;
-    return o.customer_name.toLowerCase().includes(q) || (o.customer_email ?? '').toLowerCase().includes(q);
+    // "10179" or "#10179" finds a Wix order by its number.
+    const num = q.replace(/^#/, '');
+    return (
+      o.customer_name.toLowerCase().includes(q) ||
+      (o.customer_email ?? '').toLowerCase().includes(q) ||
+      (!!num && !!o.wix_order_number && o.wix_order_number.includes(num))
+    );
   });
 
   const visibleOrders = orderChip === 'all' ? searchedOrders : searchedOrders.filter((c) => c.state === orderChip);
@@ -1145,6 +1256,26 @@ export default function TrackerSection({
             <button className="btn-solid" onClick={() => setModal('order')}>Add order</button>
           </div>
 
+          {/* Juniors / Seniors / Unassigned / All. Counts are open orders
+              (not Done), so Unassigned always shows what still needs
+              sorting. */}
+          <div className="group-switch" role="group" aria-label="Show orders for">
+            {GROUP_FILTERS.map((g) => (
+              <button
+                key={g.key}
+                type="button"
+                className="group-switch-btn"
+                data-active={groupFilter === g.key}
+                data-attention={g.key === 'unassigned' && groupCounts.unassigned > 0}
+                aria-pressed={groupFilter === g.key}
+                onClick={() => setGroupFilter(g.key)}
+              >
+                <span>{g.label}</span>
+                <span className="group-switch-count">{groupCounts[g.key]}</span>
+              </button>
+            ))}
+          </div>
+
           <div className="chip-row">
             {CHIPS.map((c) => (
               <button
@@ -1161,7 +1292,7 @@ export default function TrackerSection({
           </div>
 
           <div className="filters">
-            <input placeholder="Search by name or email" value={orderSearch} onChange={(e) => setOrderSearch(e.target.value)} />
+            <input placeholder="Search by name, email or Wix #" value={orderSearch} onChange={(e) => setOrderSearch(e.target.value)} />
           </div>
 
           {/* Both views share one column grid — Name | Qty | Item | Ordered
@@ -1205,6 +1336,7 @@ export default function TrackerSection({
                         {n > 0 && formatDate(g.items[n - 1].ordered_at) === formatDate(i.ordered_at)
                           ? null
                           : formatDate(i.ordered_at)}
+                        <OrderTags o={i} />
                       </td>
                       {n === 0 && (
                         <td className="orders-action order-group-action" rowSpan={g.items.length}>
@@ -1217,6 +1349,7 @@ export default function TrackerSection({
                         <RowMenu
                           actions={[
                             { label: 'Hand over', onClick: () => openHandoverModal([i.id]) },
+                            ...groupActions(i),
                             ...(isAdmin ? [{ label: 'Hand over a different size', onClick: () => openSubstituteModal(i) }] : []),
                             ...(isAdmin ? [{ label: 'Remove', onClick: () => removeOrder(i.id) }] : []),
                           ]}
@@ -1248,7 +1381,10 @@ export default function TrackerSection({
                     </td>
                     <td className="orders-qty">{o.quantity}</td>
                     <td className="orders-item">{orderItemLabel(o)}</td>
-                    <td className="orders-date">{formatDate(o.ordered_at)}</td>
+                    <td className="orders-date">
+                      {formatDate(o.ordered_at)}
+                      <OrderTags o={o} />
+                    </td>
                     <td>
                       {state === 'unpaid' && <span className="pill pill-out">Unpaid</span>}
                       {state === 'owing' && (
@@ -1310,6 +1446,7 @@ export default function TrackerSection({
                         actions={[
                           ...(state === 'done' ? [{ label: 'Edit handover', onClick: () => openHandoverModal([o.id], o) }] : []),
                           ...(state === 'unpaid' ? [{ label: 'Hand over', onClick: () => openHandoverModal([o.id]) }] : []),
+                          ...groupActions(o),
                           ...(isAdmin && (state === 'ready' || state === 'waiting' || state === 'unpaid')
                             ? [{ label: 'Hand over a different size', onClick: () => openSubstituteModal(o) }]
                             : []),

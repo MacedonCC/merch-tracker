@@ -39,7 +39,7 @@ export async function GET(req: NextRequest) {
 }
 
 const ORDER_COLUMNS =
-  'id, reference, customer_name, customer_email, stock_item_id, quantity, ordered_at, distributed_at, wix_order_id, notes, source, payment_status';
+  'id, reference, customer_name, customer_email, stock_item_id, quantity, ordered_at, distributed_at, wix_order_id, wix_order_number, notes, source, payment_status';
 
 export async function POST(req: NextRequest) {
   const admin = await requireAdmin();
@@ -80,11 +80,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'That Wix order no longer exists.' }, { status: 400 });
   }
 
+  const wixLine = toPaidWixLine(wix);
   const { error } = await db.rpc('merge_payment_link_order', {
     p_manual_id: manual.id,
     p_wix_order_id: wix.wix_order_id,
-    p_note: mergeNote(toPaidWixLine(wix), manual.customer_email),
+    p_note: mergeNote(wixLine, manual.customer_email),
     p_wix_row_id: wix.id,
+    p_wix_order_number: wixLine.wixOrderNumber,
   });
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
 

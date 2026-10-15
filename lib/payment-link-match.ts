@@ -197,6 +197,7 @@ export interface OrderRow {
   ordered_at: string;
   distributed_at: string | null;
   wix_order_id: string | null;
+  wix_order_number?: string | null;
   notes: string | null;
 }
 
@@ -218,7 +219,8 @@ export function toPaidWixLine(o: OrderRow): PaidWixLine {
     rowId: o.id,
     reference: o.reference,
     wixOrderId: o.wix_order_id ?? '',
-    wixOrderNumber: o.notes?.match(/#(\d+)/)?.[1] ?? null,
+    // The column is filled from 15 Oct 2026; older rows only have it in the note.
+    wixOrderNumber: o.wix_order_number ?? o.notes?.match(/#(\d+)/)?.[1] ?? null,
     customerName: o.customer_name,
     customerEmail: o.customer_email,
     stockItemId: o.stock_item_id as string,
