@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminSupabase } from '@/lib/supabase-server';
-import { fetchProductsV3, WixV3Error, type RawProduct } from '@/lib/wix-catalogue-v3';
+import { fetchProductsV3, imageOf, productUrlOf, WixV3Error, type RawProduct } from '@/lib/wix-catalogue-v3';
 
 // Populates stock_items.image_url and stock_items.wix_product_url from
 // the Wix product catalogue, keyed on wix_product_id. The /sell flow
@@ -8,8 +8,9 @@ import { fetchProductsV3, WixV3Error, type RawProduct } from '@/lib/wix-catalogu
 // link" path, so a parent lands on the exact product rather than the
 // shop front.
 //
-// Run it after wix-import, and again whenever product photos change in
-// Wix. Safe to re-run: it only writes rows whose values actually differ.
+// wix-import now fills both columns when it creates a line, so this is
+// only needed when product photos or page addresses change in Wix. Safe
+// to re-run: it only writes rows whose values actually differ.
 //
 // Every size of a product shares one wix_product_id, so all of that
 // product's stock_items rows get the same image and URL. Items that were
@@ -31,26 +32,6 @@ function authorised(req: NextRequest): boolean {
   const secret = process.env.CRON_SECRET;
   if (!secret) return false;
   return req.headers.get('authorization') === `Bearer ${secret}`;
-}
-
-// V3 puts the primary image at media.main (read-only, the first of
-// media.itemsInfo.items). Which of image.url / url / thumbnail.url Wix
-// fills is not documented precisely, so each is tried in turn.
-function imageOf(p: RawProduct): string | null {
-  const m = p.media?.main;
-  const first = p.media?.itemsInfo?.items?.[0];
-  return (
-    m?.image?.url ?? m?.url ?? m?.thumbnail?.url ??
-    first?.image?.url ?? first?.url ??
-    p.thumbnail?.url ??
-    null
-  );
-}
-
-// V3 returns the page address ready-made, under the URL field.
-function productUrlOf(p: RawProduct): string | null {
-  const u = p.url?.url;
-  return typeof u === 'string' && u ? u : null;
 }
 
 export async function GET(req: NextRequest) {

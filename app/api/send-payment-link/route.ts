@@ -55,11 +55,6 @@ export async function POST(req: NextRequest) {
 
   if (!orderId) return ok({ sent: false, reason: 'No order was given.' });
 
-  if (!process.env.GMAIL_USER || !process.env.GMAIL_APP_PASSWORD) {
-    console.error('send-payment-link: GMAIL_USER or GMAIL_APP_PASSWORD is not set');
-    return ok({ sent: false, reason: 'Email is not configured.' });
-  }
-
   // Read the order back rather than trusting what the browser posted:
   // the product, size and price in the email must be what was actually
   // recorded, not whatever a client claimed.
@@ -99,6 +94,14 @@ export async function POST(req: NextRequest) {
   if (!item?.wix_product_url) {
     await record({ email_error: 'This item has no shop page.' });
     return ok({ sent: false, reason: 'This item has no shop page.' });
+  }
+  // Checked after the order is found, so even this is recorded on it:
+  // every outcome of a send leaves "Link emailed" or "Link not sent" on
+  // the Orders row.
+  if (!process.env.GMAIL_USER || !process.env.GMAIL_APP_PASSWORD) {
+    console.error('send-payment-link: GMAIL_USER or GMAIL_APP_PASSWORD is not set');
+    await record({ email_error: 'Email is not configured.' });
+    return ok({ sent: false, reason: 'Email is not configured.' });
   }
 
   // The logo is attached by CID rather than linked, since most clients

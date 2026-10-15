@@ -200,17 +200,18 @@ export default function SellFlow({
       handoverFailed = !!handoverError;
     }
 
-    // Email the shop link, but only when there is something to send and
-    // somewhere to send it. The order is already saved by this point, so
-    // a mail failure is reported and never rolls anything back — losing
-    // a sale because SMTP was down would be far worse than a parent
-    // having to be sent the link by text.
+    // Every payment-link sale goes through the send route, even with no
+    // address or no shop page: the route records the outcome on the order
+    // ("Link emailed" or "Link not sent: <why>"), and skipping the call
+    // here used to leave those orders saying nothing at all. The order is
+    // already saved by this point, so a mail failure is reported and never
+    // rolls anything back — losing a sale because SMTP was down would be
+    // far worse than a parent having to be sent the link by text.
     const address = email.trim();
-    const shouldEmail = method === 'link' && !!address && !!chosen.wix_product_url;
     let emailSent = false;
     let emailReason: string | null = null;
 
-    if (shouldEmail) {
+    if (method === 'link') {
       try {
         const res = await fetch('/api/send-payment-link', {
           method: 'POST',
@@ -221,7 +222,11 @@ export default function SellFlow({
         emailSent = !!result.sent;
         if (!emailSent) emailReason = result.reason ?? result.error ?? 'Sending failed.';
       } catch {
+        // The route never answered, so it recorded nothing. Best-effort
+        // note from here instead; if the connection is gone this fails
+        // too, and the done screen still says the email did not send.
         emailReason = 'No connection while sending.';
+        await supabase.from('orders').update({ email_error: emailReason }).eq('id', data.id);
       }
     }
 
@@ -236,7 +241,9 @@ export default function SellFlow({
       backorder,
       paymentUrl: chosen.wix_product_url,
       handoverFailed,
-      emailTo: shouldEmail ? address : null,
+      // Only where an email was really attempted; no shop page has its
+      // own note on the done screen.
+      emailTo: method === 'link' && address && chosen.wix_product_url ? address : null,
       emailSent,
       emailReason,
     });
@@ -449,6 +456,13 @@ export default function SellFlow({
               over today.
             </p>
           )}
+          {!chosen.wix_product_url && (
+            <p className="sell-warn">
+              This item has no shop page recorded, so a payment link cannot
+              be sent. Take cash, or the sale is saved as owing with no link
+              to give them.
+            </p>
+          )}
           <button
             className="sell-primary sell-big"
             disabled={busy}
@@ -584,7 +598,8 @@ export default function SellFlow({
             ) : (
               <p className="sell-note">
                 This item has no shop page recorded, so there is no link to
-                send. Run the Wix media sync, or take payment another way.
+                send. Take payment another way; an admin can run the Wix
+                media sync to add the shop page.
               </p>
             ))}
 

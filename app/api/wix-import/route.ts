@@ -507,6 +507,8 @@ export async function GET(req: NextRequest) {
           ...wixStockFor(entry.productId, entry.inventoryVariantId),
           wix_product_id: entry.productId,
           wix_variant_id: entry.variantId,
+          wix_product_url: p.productUrl,
+          image_url: p.imageUrl,
         });
         inserts.push({
           name: entry.productName,
@@ -517,6 +519,11 @@ export async function GET(req: NextRequest) {
           low_stock_alert: 3,
           wix_product_id: entry.productId,
           wix_variant_id: entry.variantId,
+          // Born with its shop page and photo, so /sell can send a
+          // payment link for it straight away. Only wix-media wrote these
+          // before, and it is run by hand, so new lines sat with no link.
+          wix_product_url: p.productUrl,
+          image_url: p.imageUrl,
           wix_listed_at: now,
         });
         continue;

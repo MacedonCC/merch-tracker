@@ -86,6 +86,29 @@ export interface CatProduct {
   id: string;
   name: string;
   variants: CatVariant[];
+  /** Primary image and shop page, as wix-media writes them. */
+  imageUrl: string | null;
+  productUrl: string | null;
+}
+
+// V3 puts the primary image at media.main (read-only, the first of
+// media.itemsInfo.items). Which of image.url / url / thumbnail.url Wix
+// fills is not documented precisely, so each is tried in turn.
+export function imageOf(p: RawProduct): string | null {
+  const m = p.media?.main;
+  const first = p.media?.itemsInfo?.items?.[0];
+  return (
+    m?.image?.url ?? m?.url ?? m?.thumbnail?.url ??
+    first?.image?.url ?? first?.url ??
+    p.thumbnail?.url ??
+    null
+  );
+}
+
+// V3 returns the page address ready-made, under the URL field.
+export function productUrlOf(p: RawProduct): string | null {
+  const u = p.url?.url;
+  return typeof u === 'string' && u ? u : null;
 }
 
 export interface CatalogueV3 {
@@ -154,6 +177,8 @@ export async function loadCatalogueV3(): Promise<CatalogueV3> {
       id: p.id as string,
       name: String(p.name ?? ''),
       variants: byProduct.get(p.id) ?? [],
+      imageUrl: imageOf(p),
+      productUrl: productUrlOf(p),
     }));
 
   return { products, rawProducts, rawVariants, rawInventory, inventoryError };

@@ -549,7 +549,15 @@ Two things about it are load-bearing:
 payment link" button, and are populated from the Wix catalogue by
 `app/api/wix-media/route.ts`, keyed on `wix_product_id`. Both are
 nullable: an unlinked item falls back to a lettered tile and offers no
-link. These are Wix shop product pages, **not** PlayHQ links — PlayHQ is
+link. `wix-import` fills both when it **creates** a line (from the same
+V3 product read, via `imageOf()` / `productUrlOf()` in
+`lib/wix-catalogue-v3.ts`), so a new line can take a payment link
+straight away; before 15 Oct 2026 only `wix-media` wrote them and new
+lines sat with "This item has no shop page". `wix-media` is still the
+tool for photo or page changes on existing lines. It was deliberately not
+added to the evening cron: that run imports orders and then pushes stock
+to Wix, and a catalogue read there would be one more way for it to fail,
+while still leaving a line created at 10am without a link until evening. These are Wix shop product pages, **not** PlayHQ links — PlayHQ is
 registration, not merchandise.
 
 **Payment-link matching** (`lib/payment-link-match.ts`, added 15 Oct
@@ -612,6 +620,13 @@ it are deliberate:
   non-2xx for a send failure — it answers `{ sent: false, reason }` so
   the UI can say "saved, but the email didn't send" and offer the link
   to copy. A sale must never be lost because SMTP was down.
+- `/sell` calls it for **every** payment-link sale, even with no email
+  address or no shop page, because the route is what records the
+  outcome (`email_sent_at` or `email_error`, shown on Orders as "Link
+  emailed" / "Link not sent: …"). Every path after the order is found
+  records, including "Email is not configured". If the call never
+  answers, `/sell` writes `email_error` itself. The pay step warns
+  before the sale is saved when the item has no shop page.
 - It re-reads the order and stock item **from the database by id**
   rather than trusting the product, size or price the browser posted.
 - The logo is attached by CID, not linked, since most clients block
