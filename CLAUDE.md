@@ -62,10 +62,12 @@ There is no test suite in this repo.
     check the caller's role themselves.
 - A signed-in user with no `members` row is not an error state — they see
   `NotOnCommitteeList`, not a redirect.
-- The admin page is reachable only from the avatar menu (`Header.tsx`),
-  which only renders that link for admins — there's no nav-bar entry. This
-  is the same "UI hiding is not access control" caveat as above: `/admin`
-  itself re-checks `role === 'admin'` server-side and redirects otherwise.
+- The admin page is reachable from an "Admin" nav tab (after Orders) and
+  the avatar menu (`Header.tsx`), both rendered only for admins, from the
+  same `members.role` that `/admin` checks. This is the same "UI hiding is
+  not access control" caveat as above: `/admin` itself re-checks
+  `role === 'admin'` server-side and redirects otherwise, and every
+  admin API route calls `requireAdmin()`.
 
 ### Permission model — helpers can hold four fine-grained flags
 

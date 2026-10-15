@@ -96,6 +96,11 @@ a { color: var(--accent); }
   box-shadow: var(--shine-shadow);
 }
 .nav-tab:hover { color: var(--ink); background-color: var(--paper); }
+/* Six tabs for an admin: keeps them to two rows down to a 320px phone. */
+@media (max-width: 420px) {
+  .header-nav-inner { padding: 10px 16px; gap: 8px; }
+  .nav-tab { padding: 10px 15px; }
+}
 .nav-tab[data-active="true"] {
   background-color: var(--accent); background-image: var(--sheen-on-accent);
   border-color: var(--accent); color: #fff; font-weight: 600;

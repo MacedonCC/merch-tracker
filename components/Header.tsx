@@ -15,6 +15,13 @@ const NAV_ITEMS = [
   { label: 'Orders', href: '/orders' },
 ];
 
+// Shown only when `role` is admin. Every page passes `role` from
+// resolveViewer()'s members row, the same value /admin checks before
+// rendering, so the tab and the page always agree. Hiding the tab is
+// not the access control: /admin and every admin API route re-check
+// the role on the server.
+const ADMIN_ITEM = { label: 'Admin', href: '/admin' };
+
 export default function Header({
   userEmail,
   fullName,
@@ -99,7 +106,7 @@ export default function Header({
       </div>
       <nav className="header-nav">
         <div className="header-nav-inner">
-          {NAV_ITEMS.map((n) => (
+          {(isAdmin ? [...NAV_ITEMS, ADMIN_ITEM] : NAV_ITEMS).map((n) => (
             <Link key={n.href} href={n.href} className="nav-tab" data-active={isActive(n.href)}>
               {n.label}
             </Link>
