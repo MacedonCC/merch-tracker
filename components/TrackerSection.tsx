@@ -916,14 +916,19 @@ export default function TrackerSection({
   // vs Waiting is a queue across every order for a size, so classifying
   // only the Juniors would let a Juniors order claim a shirt an earlier
   // Seniors order is already owed.
-  const openCount = (f: GroupFilter) =>
-    classifiedOrders.filter((c) => c.state !== 'done' && inGroup(c.order, f)).length;
+  //
+  // Counts include Done orders, so Juniors + Seniors + Unassigned adds
+  // up to All and it is clear where every completed order lives. The
+  // amber "needs sorting" cue on Unassigned is driven by OPEN orders
+  // only: Done orders of non-JNR sizes stay unassigned by design.
+  const groupCount = (f: GroupFilter) => classifiedOrders.filter((c) => inGroup(c.order, f)).length;
   const groupCounts: Record<GroupFilter, number> = {
-    juniors: openCount('juniors'),
-    seniors: openCount('seniors'),
-    unassigned: openCount('unassigned'),
-    all: openCount('all'),
+    juniors: groupCount('juniors'),
+    seniors: groupCount('seniors'),
+    unassigned: groupCount('unassigned'),
+    all: groupCount('all'),
   };
+  const openUnassigned = classifiedOrders.filter((c) => c.state !== 'done' && c.order.order_group == null).length;
   const groupedOrders = classifiedOrders.filter((c) => inGroup(c.order, groupFilter));
 
   const orderCounts = {
@@ -1256,9 +1261,9 @@ export default function TrackerSection({
             <button className="btn-solid" onClick={() => setModal('order')}>Add order</button>
           </div>
 
-          {/* Juniors / Seniors / Unassigned / All. Counts are open orders
-              (not Done), so Unassigned always shows what still needs
-              sorting. */}
+          {/* Juniors / Seniors / Unassigned / All. Counts include Done
+              orders; Unassigned turns amber while any OPEN order is
+              unassigned, so what still needs sorting stands out. */}
           <div className="group-switch" role="group" aria-label="Show orders for">
             {GROUP_FILTERS.map((g) => (
               <button
@@ -1266,7 +1271,7 @@ export default function TrackerSection({
                 type="button"
                 className="group-switch-btn"
                 data-active={groupFilter === g.key}
-                data-attention={g.key === 'unassigned' && groupCounts.unassigned > 0}
+                data-attention={g.key === 'unassigned' && openUnassigned > 0}
                 aria-pressed={groupFilter === g.key}
                 onClick={() => setGroupFilter(g.key)}
               >
