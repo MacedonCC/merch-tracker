@@ -69,6 +69,9 @@ export async function GET(req: NextRequest) {
     awaitingHandover: sync.awaitingHandover,
     unmatched: sync.unmatched,
     noSizeRecorded: sync.noSizeRecorded,
+    paymentLinkMatching: sync.paymentLinkMatching,
+    paymentLinkMerges: sync.paymentLinkMerges,
+    paymentLinkErrors: sync.paymentLinkErrors,
     message: sync.message,
     ranAt: new Date().toISOString(),
   });

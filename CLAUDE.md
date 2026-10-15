@@ -538,6 +538,36 @@ nullable: an unlinked item falls back to a lettered tile and offers no
 link. These are Wix shop product pages, **not** PlayHQ links — PlayHQ is
 registration, not merchandise.
 
+**Payment-link matching** (`lib/payment-link-match.ts`, added 15 Oct
+2026). A payment link only opens the Wix product page, so the
+customer's payment arrives as a *new* Wix order and the /sell row
+stays unpaid. The matcher pairs them on **email, not name** (the coach
+types the child, the parent pays): open manual order (pending, no
+`wix_order_id`), same email case-insensitive, same stock item, same
+quantity, placed before the Wix order and within 30 days, exactly one
+candidate, one-to-one, Wix line not handed over. Anything less is
+listed, never merged. `merge_payment_link_order()`
+(`supabase/migrations/20261015000001_merge_payment_link_order.sql`)
+applies a merge: **the manual row survives** (name, email, handover
+state) and takes the Wix order id, `paid` and `online`, plus a note
+naming the payer; an already-imported Wix row is deleted in the same
+transaction. Same item is *required*, because holding
+`(wix_order_id, stock_item_id)` is what stops wix-sync re-importing the
+line. Stock never moves; a handed-over Wix row is refused, because
+wix-sync inserts Wix-FULFILLED orders handed over without a deduction,
+so deleting one would restore stock that never came out. It is
+service-role only and gets past `check_order_update()` with a
+transaction-local `app.order_merge` flag.
+- `runWixSync()` merges certain pairs instead of inserting them, only
+  when **`PAYMENT_LINK_MATCH_ENABLED=true`** (default off).
+- Everything else (needs confirming, near-misses: different size,
+  quantity or email) shows on the Admin page's "Payment-link matches"
+  card, computed live from `orders` on each load. Admins approve
+  (merge) or mark "Different sales" there (`POST
+  /api/payment-link-match`; dismissals in `payment_match_dismissals`).
+  `GET /api/payment-link-match` with `CRON_SECRET` is a read-only dry
+  run of the whole database.
+
 `orders.payment_method` is `cash | online | unknown`. Historical rows
 default to `unknown`; every Wix row is `online` (backfilled, and set on
 import).

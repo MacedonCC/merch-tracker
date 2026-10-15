@@ -937,3 +937,16 @@ th.num, td.num { text-align: right; }
   background: none; border: none; cursor: pointer; padding: 0 2px;
   font-size: 1.1rem; line-height: 1; color: var(--ink-soft);
 }
+
+/* Admin page: "Payment-link matches" card (components/PaymentMatchPanel.tsx). */
+.match-pair { border: 1px solid var(--line); border-radius: 8px; padding: 0.75rem; margin-bottom: 0.75rem; }
+.match-pair-head { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin-bottom: 0.6rem; }
+.match-sides { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; font-size: 0.85rem; }
+.match-side { min-width: 0; overflow-wrap: anywhere; }
+.match-side-title { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--ink-faint); margin-bottom: 0.2rem; }
+.match-muted { color: var(--ink-soft); font-size: 0.82rem; }
+.match-actions { display: flex; gap: 0.5rem; margin-top: 0.6rem; flex-wrap: wrap; }
+@media (max-width: 600px) {
+  .match-sides { grid-template-columns: 1fr; }
+  .match-actions button { min-height: 44px; }
+}

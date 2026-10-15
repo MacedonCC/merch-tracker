@@ -200,14 +200,8 @@ export interface OrderRow {
   notes: string | null;
 }
 
-export function buildReport(
-  manualRows: OrderRow[],
-  wixRows: OrderRow[],
-  stockRows: { id: string; name: string; size: string }[],
-) {
-  const stock = new Map<string, StockLabel>(stockRows.map((s) => [s.id, { name: s.name, size: s.size }]));
-
-  const manuals: ManualOrderCandidate[] = manualRows.map((o) => ({
+export function toManualCandidate(o: OrderRow): ManualOrderCandidate {
+  return {
     id: o.id,
     reference: o.reference,
     customerName: o.customer_name,
@@ -216,9 +210,11 @@ export function buildReport(
     quantity: o.quantity,
     orderedAt: o.ordered_at,
     distributedAt: o.distributed_at,
-  }));
+  };
+}
 
-  const wixLines: PaidWixLine[] = wixRows.map((o) => ({
+export function toPaidWixLine(o: OrderRow): PaidWixLine {
+  return {
     rowId: o.id,
     reference: o.reference,
     wixOrderId: o.wix_order_id ?? '',
@@ -229,7 +225,18 @@ export function buildReport(
     quantity: o.quantity,
     orderedAt: o.ordered_at,
     handedOver: o.distributed_at !== null,
-  }));
+  };
+}
+
+export function buildReport(
+  manualRows: OrderRow[],
+  wixRows: OrderRow[],
+  stockRows: { id: string; name: string; size: string }[],
+) {
+  const stock = new Map<string, StockLabel>(stockRows.map((s) => [s.id, { name: s.name, size: s.size }]));
+
+  const manuals = manualRows.map(toManualCandidate);
+  const wixLines = wixRows.map(toPaidWixLine);
 
   const result = matchPaymentLinks(manuals, wixLines, stock);
 

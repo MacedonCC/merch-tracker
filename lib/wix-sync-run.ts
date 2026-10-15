@@ -1,5 +1,12 @@
 import { createAdminSupabase } from '@/lib/supabase-server';
 import { tidyName, nameSizeKey } from '@/lib/types';
+import {
+  matchPaymentLinks,
+  mergeNote,
+  toManualCandidate,
+  type OrderRow,
+  type PaidWixLine,
+} from '@/lib/payment-link-match';
 
 // This module pulls the FULL order history from the Wix store and
 // records it. It pages through every order (no lookback window), so it
@@ -51,6 +58,20 @@ import { tidyName, nameSizeKey } from '@/lib/types';
 // every caller is forced to put it after the import (see the ordering
 // note in lib/wix-push.ts). Callers today: app/api/wix-sync (the daily
 // cron) and app/api/wix-push's POST (the "Push to Wix now" button).
+//
+// PAYMENT-LINK MATCHING (PAYMENT_LINK_MATCH_ENABLED=true, default off).
+// A /sell payment link only opens the Wix product page, so the
+// customer's payment arrives here as a new Wix order. When the flag is
+// on, a new paid line that lib/payment-link-match.ts pairs with an open
+// /sell order with certainty is NOT inserted: merge_payment_link_order()
+// attaches its Wix order id, paid and online to the /sell row instead.
+// That row then holds the (wix_order_id, stock_item_id) pair, so the
+// dedup below skips the line on every later run. Stock never moves
+// (see the migration). Anything less certain is inserted as normal and
+// shows up on the Admin page's "Payment-link matches" card, which runs
+// the same matcher over what is already imported. One extra read when
+// there is anything new to insert, plus one RPC per merge — a handful
+// a day at most, so the constant-calls shape below is essentially kept.
 
 export const DEFAULT_LIMIT = 500;
 
@@ -99,6 +120,18 @@ interface WixOrder {
   lineItems?: WixLineItem[];
 }
 
+export function paymentLinkMatchEnabled(): boolean {
+  return process.env.PAYMENT_LINK_MATCH_ENABLED === 'true';
+}
+
+export interface PaymentLinkMerge {
+  /** The /sell order that survived. */
+  reference: string;
+  customerName: string;
+  wixOrderNumber: string | null;
+  paidBy: string;
+}
+
 export interface SyncResult {
   ok: boolean;
   /** HTTP status a route should answer with. 200 on success. */
@@ -110,6 +143,10 @@ export interface SyncResult {
   awaitingHandover: number;
   unmatched: UnmatchedLine[];
   noSizeRecorded: NoSizeLine[];
+  paymentLinkMatching: 'on' | 'off';
+  paymentLinkMerges: PaymentLinkMerge[];
+  /** Merges that failed; those lines were imported as normal instead. */
+  paymentLinkErrors: string[];
   message: string;
 }
 
@@ -117,7 +154,10 @@ function fail(status: number, error: string): SyncResult {
   return {
     ok: false, status, error,
     totalFetched: 0, imported: 0, fulfilled: 0, awaitingHandover: 0,
-    unmatched: [], noSizeRecorded: [], message: error,
+    unmatched: [], noSizeRecorded: [],
+    paymentLinkMatching: paymentLinkMatchEnabled() ? 'on' : 'off',
+    paymentLinkMerges: [], paymentLinkErrors: [],
+    message: error,
   };
 }
 
@@ -228,6 +268,8 @@ export async function runWixSync(opts: { limit?: number } = {}): Promise<SyncRes
 
   // ---- Build every row to insert in memory, no DB calls here ----
   const toInsert: Record<string, unknown>[] = [];
+  // Parallel to toInsert: the same line as the payment-link matcher sees it.
+  const incoming: PaidWixLine[] = [];
   const unmatched = new Map<string, UnmatchedLine>();
   const noSizeRecorded = new Map<string, NoSizeLine>();
   let fulfilled = 0;
@@ -319,6 +361,65 @@ export async function runWixSync(opts: { limit?: number } = {}): Promise<SyncRes
         distributed_at: distributedAt,
         notes: order.number ? `Wix order #${order.number}` : null,
       });
+      incoming.push({
+        rowId: null,
+        reference: null,
+        wixOrderId: order.id,
+        wixOrderNumber: order.number ? String(order.number) : null,
+        customerName,
+        customerEmail: order.buyerInfo?.email ?? null,
+        stockItemId: match.id,
+        quantity: line.quantity ?? 1,
+        orderedAt: order.createdDate ?? new Date().toISOString(),
+        handedOver: isFulfilled,
+      });
+    }
+  }
+
+  // ---- Payment-link matching, before the insert ----
+  // A merged line is dropped from the insert. A failed merge is not: it
+  // is imported as normal, so a payment is never lost to a merge error.
+  const paymentLinkMerges: PaymentLinkMerge[] = [];
+  const paymentLinkErrors: string[] = [];
+  let rowsToInsert = toInsert;
+  if (paymentLinkMatchEnabled() && toInsert.length > 0) {
+    const { data: open, error: openError } = await supabase
+      .from('orders')
+      .select('id, reference, customer_name, customer_email, stock_item_id, quantity, ordered_at, distributed_at, wix_order_id, notes')
+      .eq('source', 'manual')
+      .eq('payment_status', 'pending')
+      .is('wix_order_id', null);
+
+    if (openError) {
+      paymentLinkErrors.push(`Could not read open orders, so nothing was matched: ${openError.message}`);
+    } else {
+      const labels = new Map(rows.map((s) => [s.id, { name: s.name, size: s.size }]));
+      const result = matchPaymentLinks(((open ?? []) as OrderRow[]).map(toManualCandidate), incoming, labels);
+      const merged = new Set<PaidWixLine>();
+
+      for (const { manual, wix } of result.autoMerge) {
+        const { error } = await supabase.rpc('merge_payment_link_order', {
+          p_manual_id: manual.id,
+          p_wix_order_id: wix.wixOrderId,
+          p_note: mergeNote(wix, manual.customerEmail),
+          p_wix_row_id: null,
+        });
+        if (error) {
+          paymentLinkErrors.push(`${manual.reference}: ${error.message}`);
+          continue;
+        }
+        merged.add(wix);
+        paymentLinkMerges.push({
+          reference: manual.reference,
+          customerName: manual.customerName,
+          wixOrderNumber: wix.wixOrderNumber,
+          paidBy: wix.customerName,
+        });
+      }
+
+      // Auto-merges are never handed-over lines, so each came off awaitingHandover.
+      awaitingHandover -= merged.size;
+      rowsToInsert = toInsert.filter((_, i) => !merged.has(incoming[i]));
     }
   }
 
@@ -327,23 +428,31 @@ export async function runWixSync(opts: { limit?: number } = {}): Promise<SyncRes
   // row, so the AFTER UPDATE stock trigger never fires for historical
   // imports — see the note at the top of this file. ignoreDuplicates
   // is a safety net on top of the in-memory `seen` check above.
-  if (toInsert.length > 0) {
+  if (rowsToInsert.length > 0) {
     const { error } = await supabase
       .from('orders')
-      .upsert(toInsert, { onConflict: 'wix_order_id,stock_item_id', ignoreDuplicates: true });
+      .upsert(rowsToInsert, { onConflict: 'wix_order_id,stock_item_id', ignoreDuplicates: true });
 
-    if (error) return fail(500, error.message);
+    if (error) {
+      const merges = paymentLinkMerges.length
+        ? ` (${paymentLinkMerges.length} payment-link order(s) were already merged: ${paymentLinkMerges.map((m) => m.reference).join(', ')})`
+        : '';
+      return fail(500, error.message + merges);
+    }
   }
 
   return {
     ok: true,
     status: 200,
     totalFetched: wixOrders.length,
-    imported: toInsert.length,
+    imported: rowsToInsert.length,
     fulfilled,
     awaitingHandover,
     unmatched: Array.from(unmatched.values()),
     noSizeRecorded: Array.from(noSizeRecorded.values()),
+    paymentLinkMatching: paymentLinkMatchEnabled() ? 'on' : 'off',
+    paymentLinkMerges,
+    paymentLinkErrors,
     message: unmatched.size
       ? 'Some Wix products are not linked to a stock item yet. Add their Wix product ID in the app.'
       : 'Sync complete.',

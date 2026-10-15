@@ -576,9 +576,16 @@ export default function TrackerSection({
       // anything: 'no new orders' and 'the import never ran' must not
       // look the same, same reasoning as the cancel message above.
       const imported = result.sync?.imported ?? 0;
+      // A payment matched to a /sell order is merged into it, not imported.
+      const merged = result.sync?.paymentLinkMerges?.length ?? 0;
+      const mergedNote = merged
+        ? `Matched ${merged} Wix payment${merged === 1 ? '' : 's'} to existing payment-link order${merged === 1 ? '' : 's'}. `
+        : '';
       const importedNote = imported
-        ? `Imported ${imported} new Wix order line${imported === 1 ? '' : 's'} first. `
-        : 'No new Wix orders to import. ';
+        ? `Imported ${imported} new Wix order line${imported === 1 ? '' : 's'} first. ${mergedNote}`
+        : merged
+          ? mergedNote
+          : 'No new Wix orders to import. ';
       setPushSummary(
         result.error
           ? `Push failed: ${result.error}`

@@ -93,6 +93,8 @@ export async function POST(req: NextRequest) {
       imported: sync.imported,
       totalFetched: sync.totalFetched,
       unmatched: sync.unmatched,
+      paymentLinkMerges: sync.paymentLinkMerges,
+      paymentLinkErrors: sync.paymentLinkErrors,
     },
     pushEnabled: pushEnabled(),
     mode: result.wrote ? 'write' : 'report',
