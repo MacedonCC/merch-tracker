@@ -1,9 +1,10 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { createClient } from '@/lib/supabase-client';
 import { money, sizeRank, tidyName } from '@/lib/types';
-import { buildPaymentMessage, canShare, copyText, shareText } from '@/lib/payment-message';
+import { buildPaymentMessage, copyText } from '@/lib/payment-message';
+import CopyIcon from '@/components/CopyIcon';
 
 export interface SellItem {
   id: string;
@@ -81,9 +82,6 @@ export default function SellFlow({
   const [sale, setSale] = useState<Sale | null>(null);
   const [copied, setCopied] = useState(false);
   const [messageCopied, setMessageCopied] = useState(false);
-  // Set after mount: navigator does not exist during server render.
-  const [shareSupported, setShareSupported] = useState(false);
-  useEffect(() => setShareSupported(canShare()), []);
   // Juniors / Seniors: who manages this order's handover (orders.order_group).
   // Defaults from the size each time one is picked; a label only, it
   // changes nothing about stock or payment.
@@ -270,8 +268,8 @@ export default function SellFlow({
     }
   }
 
-  // Same message and record as the Orders row ⋯ menu. Clipboard and share
-  // are called before any await so iOS still sees the tap.
+  // Same message and record as the Orders row ⋯ menu. The clipboard is
+  // written before any await so iOS still sees the tap.
   function saleMessage(s: Sale): string {
     return buildPaymentMessage({
       customerName: s.customerName,
@@ -285,7 +283,7 @@ export default function SellFlow({
     });
   }
 
-  async function recordLinkShared(s: Sale, via: 'copied' | 'shared') {
+  async function recordLinkShared(s: Sale, via: 'copied') {
     await supabase
       .from('orders')
       .update({ link_shared_at: new Date().toISOString(), link_shared_via: via })
@@ -300,12 +298,6 @@ export default function SellFlow({
     setMessageCopied(true);
     setTimeout(() => setMessageCopied(false), 2000);
     recordLinkShared(s, 'copied');
-  }
-
-  async function shareMessage(s: Sale) {
-    const result = await shareText(saleMessage(s));
-    if (result === 'failed') setError('Could not open sharing.');
-    if (result === 'shared') recordLinkShared(s, 'shared');
   }
 
   return (
@@ -640,16 +632,13 @@ export default function SellFlow({
                   className="sell-secondary sell-big"
                   onClick={() => copyLink(sale.paymentUrl as string)}
                 >
+                  <CopyIcon />
                   {copied ? 'Copied' : 'Copy link'}
                 </button>
                 <button className="sell-secondary sell-big" onClick={() => copyMessage(sale)}>
+                  <CopyIcon />
                   {messageCopied ? 'Copied' : 'Copy payment message'}
                 </button>
-                {shareSupported && (
-                  <button className="sell-secondary sell-big" onClick={() => shareMessage(sale)}>
-                    Share…
-                  </button>
-                )}
               </div>
             ) : (
               <p className="sell-note">

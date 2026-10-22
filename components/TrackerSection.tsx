@@ -1,10 +1,11 @@
 'use client';
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createClient } from '@/lib/supabase-client';
 import { projectRestock } from '@/lib/restock';
 import type { MemberPermissions } from '@/lib/member';
-import { buildPaymentMessage, canShare, copyText, linkSharedLabel, shareText } from '@/lib/payment-message';
+import { buildPaymentMessage, copyText, linkSharedLabel } from '@/lib/payment-message';
+import CopyIcon from '@/components/CopyIcon';
 
 // The nearest ancestor that would clip an overflowing child (the
 // Orders card has overflow: hidden), or null if only the viewport does.
@@ -18,7 +19,7 @@ function clippingAncestor(el: HTMLElement): HTMLElement | null {
 // A small "..." menu for a row's secondary actions — Remove today,
 // anything else later — kept separate from the one visible primary
 // action per row (Mark paid / Hand over / Undo).
-function RowMenu({ actions }: { actions: { label: string; onClick: () => void }[] }) {
+function RowMenu({ actions }: { actions: { label: string; icon?: ReactNode; onClick: () => void }[] }) {
   const [open, setOpen] = useState(false);
   const [dropUp, setDropUp] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -71,6 +72,7 @@ function RowMenu({ actions }: { actions: { label: string; onClick: () => void }[
               className="row-menu-item"
               onClick={() => { setOpen(false); a.onClick(); }}
             >
+              {a.icon}
               {a.label}
             </button>
           ))}
@@ -428,9 +430,6 @@ export default function TrackerSection({
     id: string; date: string; initials: string; note: string; options: StockRow[]; givenId: string;
   } | null>(null);
   const [message, setMessage] = useState('');
-  // Set after mount: navigator does not exist during server render.
-  const [shareSupported, setShareSupported] = useState(false);
-  useEffect(() => setShareSupported(canShare()), []);
 
   const [search, setSearch] = useState('');
   const [cat, setCat] = useState('');
@@ -844,8 +843,8 @@ export default function TrackerSection({
     load();
   }
 
-  // Payment link by SMS / WhatsApp instead of email. Clipboard and share
-  // run first, synchronously from the tap, since iOS refuses either
+  // Payment link by SMS / WhatsApp instead of email. The clipboard write
+  // runs first, synchronously from the tap, since iOS refuses either
   // without a fresh user gesture; recording on the order comes after.
   function paymentMessage(o: OrderRow): string | null {
     const url = o.stock_items?.wix_product_url;
@@ -862,7 +861,7 @@ export default function TrackerSection({
     });
   }
 
-  async function recordLinkShared(id: string, via: 'copied' | 'shared') {
+  async function recordLinkShared(id: string, via: 'copied') {
     await supabase
       .from('orders')
       .update({ link_shared_at: new Date().toISOString(), link_shared_via: via })
@@ -876,14 +875,6 @@ export default function TrackerSection({
     if (!(await copyText(text))) return flash('Could not copy the message.');
     flash('Copied');
     recordLinkShared(o.id, 'copied');
-  }
-
-  async function shareMessage(o: OrderRow) {
-    const text = paymentMessage(o);
-    if (!text) return;
-    const result = await shareText(text);
-    if (result === 'failed') return flash('Could not open sharing.');
-    if (result === 'shared') recordLinkShared(o.id, 'shared');
   }
 
   async function removeOrder(id: string) {
@@ -1514,10 +1505,7 @@ export default function TrackerSection({
                             ? [{ label: 'Resend payment link', onClick: () => resendLink(o) }]
                             : []),
                           ...((state === 'unpaid' || state === 'owing') && o.source === 'manual' && o.payment_status === 'pending' && o.stock_items?.wix_product_url
-                            ? [
-                                { label: 'Copy payment message', onClick: () => copyMessage(o) },
-                                ...(shareSupported ? [{ label: 'Share…', onClick: () => shareMessage(o) }] : []),
-                              ]
+                            ? [{ label: 'Copy payment message', icon: <CopyIcon />, onClick: () => copyMessage(o) }]
                             : []),
                           ...(isAdmin ? [{ label: 'Remove', onClick: () => removeOrder(o.id) }] : []),
                         ]}

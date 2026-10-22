@@ -2,8 +2,9 @@ import { money } from '@/lib/types';
 
 // The payment-link message sent by SMS or WhatsApp rather than email
 // (emails often land in junk). Built in the browser from the order as
-// loaded; it only ever goes to the clipboard or the share sheet, never
-// through a server.
+// loaded; it only ever goes to the clipboard, never through a server.
+// (A "Share…" option existed briefly; its "Link shared" records still
+// display via linkSharedLabel.)
 
 export interface PaymentMessageInput {
   customerName: string;
@@ -30,13 +31,6 @@ export function buildPaymentMessage(m: PaymentMessageInput): string {
   return `Hi ${first}, here's the link to pay for ${what}, ${amount}: ${m.paymentUrl}.${emailLine} Thanks, Macedon Cricket Club`;
 }
 
-/** Phones only, in practice: desktop Chrome on Windows has navigator.share
- *  too, which is fine — it opens the OS share panel. Call after mount, not
- *  during render, or server and client markup disagree. */
-export function canShare(): boolean {
-  return typeof navigator !== 'undefined' && typeof navigator.share === 'function';
-}
-
 /** Must be called synchronously from the tap handler (before any await),
  *  or iOS Safari refuses for lack of a user gesture. */
 export async function copyText(text: string): Promise<boolean> {
@@ -61,18 +55,6 @@ export async function copyText(text: string): Promise<boolean> {
     }
     ta.remove();
     return ok;
-  }
-}
-
-/** Resolves 'shared', 'cancelled' (the person closed the sheet — not
- *  recorded), or 'failed'. Text only, no separate `url`: WhatsApp and
- *  Messages would otherwise append the link a second time. */
-export async function shareText(text: string): Promise<'shared' | 'cancelled' | 'failed'> {
-  try {
-    await navigator.share({ text });
-    return 'shared';
-  } catch (e) {
-    return (e as Error)?.name === 'AbortError' ? 'cancelled' : 'failed';
   }
 }
 

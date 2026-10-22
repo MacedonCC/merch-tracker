@@ -369,6 +369,9 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1
   box-shadow: none;
 }
 .row-menu-item:hover { background: var(--wash); }
+/* Icon before a label, in the ⋯ menu and on /sell's copy buttons. */
+.copy-icon { flex: none; vertical-align: -0.125em; margin-right: 0.45em; }
+.sell-secondary .copy-icon { width: 1.1em; height: 1.1em; }
 /* Bigger ⋯ button and taller menu rows so adjacent items can't be
    mis-tapped; useLayoutEffect's up/down flip in RowMenu measures the
    rendered menu itself, so it keeps working at this size unchanged. */

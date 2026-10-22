@@ -647,14 +647,14 @@ Auth follows the committee-action pattern (cookie-bound client,
 by a signed-in coach — and it is deliberately not admin-only.
 
 **Payment message by SMS / WhatsApp** (`lib/payment-message.ts`, 23 Oct
-2026), for when email lands in junk: "Copy payment message" and
-"Share…" (native share sheet, hidden where `navigator.share` is
-missing) on the Orders row ⋯ menu for pending manual orders with a
+2026), for when email lands in junk: "Copy payment message" on
+the Orders row ⋯ menu for pending manual orders with a
 shop page, and on the /sell done screen. Browser-only; any committee
 member. Records `orders.link_shared_at` / `link_shared_via`
-(`copied | shared`, migration `20261023000001`), shown as "Link copied
-23/10". A cancelled share is not recorded. Clipboard/share must be
-called before any `await` in the tap handler, or iOS refuses them.
+(migration `20261023000001`), shown as "Link copied 23/10". A
+short-lived "Share…" option was removed; its `shared` records still
+display as "Link shared". The clipboard write must happen before any
+`await` in the tap handler, or iOS refuses it.
 
 ### Route structure
 
