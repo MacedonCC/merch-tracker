@@ -642,6 +642,16 @@ it are deliberate:
   `committed`, which moves `available`, `stock_status` and
   `suggested_order` everywhere.
 
+**Payment message by SMS / WhatsApp** (`lib/payment-message.ts`, 23 Oct
+2026), for when email lands in junk: "Copy payment message" and
+"Share…" (native share sheet, hidden where `navigator.share` is
+missing) on the Orders row ⋯ menu for pending manual orders with a
+shop page, and on the /sell done screen. Browser-only; any committee
+member. Records `orders.link_shared_at` / `link_shared_via`
+(`copied | shared`, migration `20261023000001`), shown as "Link copied
+23/10". A cancelled share is not recorded. Clipboard/share must be
+called before any `await` in the tap handler, or iOS refuses them.
+
 Auth follows the committee-action pattern (cookie-bound client,
 `getCurrentMember()`), not the `CRON_SECRET` pattern — it is triggered
 by a signed-in coach — and it is deliberately not admin-only.

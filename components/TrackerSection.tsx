@@ -4,6 +4,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createClient } from '@/lib/supabase-client';
 import { projectRestock } from '@/lib/restock';
 import type { MemberPermissions } from '@/lib/member';
+import { buildPaymentMessage, canShare, copyText, linkSharedLabel, shareText } from '@/lib/payment-message';
 
 // The nearest ancestor that would clip an overflowing child (the
 // Orders card has overflow: hidden), or null if only the viewport does.
@@ -121,6 +122,10 @@ interface OrderRow {
   payment_method?: 'cash' | 'online' | 'unknown';
   email_sent_at?: string | null;
   email_error?: string | null;
+  // Payment message copied or shared instead of emailed (migration
+  // 20261023000001).
+  link_shared_at?: string | null;
+  link_shared_via?: 'copied' | 'shared' | null;
   ordered_at: string;
   notes: string | null;
   // Who manages the handover; null = unassigned. A label only - see
@@ -129,7 +134,7 @@ interface OrderRow {
   order_group: OrderGroupName | null;
   // Display and search only (migration 20261015000004).
   wix_order_number: string | null;
-  stock_items?: { name: string; size: string } | null;
+  stock_items?: { name: string; size: string; wix_product_url?: string | null } | null;
   // Only present when a different size was handed over than was
   // ordered — see "Hand over a different size" below.
   given_item?: { name: string; size: string } | null;
@@ -423,6 +428,9 @@ export default function TrackerSection({
     id: string; date: string; initials: string; note: string; options: StockRow[]; givenId: string;
   } | null>(null);
   const [message, setMessage] = useState('');
+  // Set after mount: navigator does not exist during server render.
+  const [shareSupported, setShareSupported] = useState(false);
+  useEffect(() => setShareSupported(canShare()), []);
 
   const [search, setSearch] = useState('');
   const [cat, setCat] = useState('');
@@ -462,7 +470,7 @@ export default function TrackerSection({
         // given_stock_item_id), so both embeds need an explicit hint —
         // PostgREST refuses an ambiguous embed even when only one is
         // requested.
-        .select('*, stock_items!stock_item_id(name, size), given_item:stock_items!given_stock_item_id(name, size)')
+        .select('*, stock_items!stock_item_id(name, size, wix_product_url), given_item:stock_items!given_stock_item_id(name, size)')
         .order('ordered_at', { ascending: false }),
       supabase.from('stock_items').select('id, wix_listed_at, retired_at'),
     ]);
@@ -834,6 +842,48 @@ export default function TrackerSection({
       flash('Not sent: no connection.');
     }
     load();
+  }
+
+  // Payment link by SMS / WhatsApp instead of email. Clipboard and share
+  // run first, synchronously from the tap, since iOS refuses either
+  // without a fresh user gesture; recording on the order comes after.
+  function paymentMessage(o: OrderRow): string | null {
+    const url = o.stock_items?.wix_product_url;
+    if (!url || !o.stock_items) return null;
+    return buildPaymentMessage({
+      customerName: o.customer_name,
+      productName: o.stock_items.name,
+      size: o.stock_items.size,
+      quantity: o.quantity,
+      unitPrice: Number(o.unit_price) || 0,
+      paymentUrl: url,
+      email: o.customer_email,
+      collected: !!o.distributed_at,
+    });
+  }
+
+  async function recordLinkShared(id: string, via: 'copied' | 'shared') {
+    await supabase
+      .from('orders')
+      .update({ link_shared_at: new Date().toISOString(), link_shared_via: via })
+      .eq('id', id);
+    load();
+  }
+
+  async function copyMessage(o: OrderRow) {
+    const text = paymentMessage(o);
+    if (!text) return;
+    if (!(await copyText(text))) return flash('Could not copy the message.');
+    flash('Copied');
+    recordLinkShared(o.id, 'copied');
+  }
+
+  async function shareMessage(o: OrderRow) {
+    const text = paymentMessage(o);
+    if (!text) return;
+    const result = await shareText(text);
+    if (result === 'failed') return flash('Could not open sharing.');
+    if (result === 'shared') recordLinkShared(o.id, 'shared');
   }
 
   async function removeOrder(id: string) {
@@ -1383,6 +1433,11 @@ export default function TrackerSection({
                           Link not sent: {o.email_error}
                         </div>
                       )}
+                      {o.link_shared_at && (
+                        <div style={{ fontSize: '0.75rem', color: 'var(--ink-faint)' }}>
+                          {linkSharedLabel(o.link_shared_via, o.link_shared_at)}
+                        </div>
+                      )}
                     </td>
                     <td className="orders-qty">{o.quantity}</td>
                     <td className="orders-item">{orderItemLabel(o)}</td>
@@ -1457,6 +1512,12 @@ export default function TrackerSection({
                             : []),
                           ...(isAdmin && o.source === 'manual' && o.payment_status === 'pending' && o.customer_email
                             ? [{ label: 'Resend payment link', onClick: () => resendLink(o) }]
+                            : []),
+                          ...((state === 'unpaid' || state === 'owing') && o.source === 'manual' && o.payment_status === 'pending' && o.stock_items?.wix_product_url
+                            ? [
+                                { label: 'Copy payment message', onClick: () => copyMessage(o) },
+                                ...(shareSupported ? [{ label: 'Share…', onClick: () => shareMessage(o) }] : []),
+                              ]
                             : []),
                           ...(isAdmin ? [{ label: 'Remove', onClick: () => removeOrder(o.id) }] : []),
                         ]}

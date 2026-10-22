@@ -1,8 +1,9 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { createClient } from '@/lib/supabase-client';
 import { money, sizeRank, tidyName } from '@/lib/types';
+import { buildPaymentMessage, canShare, copyText, shareText } from '@/lib/payment-message';
 
 export interface SellItem {
   id: string;
@@ -17,6 +18,8 @@ export interface SellItem {
 type Step = 'product' | 'size' | 'who' | 'pay' | 'timing' | 'done';
 
 interface Sale {
+  orderId: string;
+  customerEmail: string | null;
   productName: string;
   size: string;
   customerName: string;
@@ -77,6 +80,10 @@ export default function SellFlow({
   const [error, setError] = useState<string | null>(null);
   const [sale, setSale] = useState<Sale | null>(null);
   const [copied, setCopied] = useState(false);
+  const [messageCopied, setMessageCopied] = useState(false);
+  // Set after mount: navigator does not exist during server render.
+  const [shareSupported, setShareSupported] = useState(false);
+  useEffect(() => setShareSupported(canShare()), []);
   // Juniors / Seniors: who manages this order's handover (orders.order_group).
   // Defaults from the size each time one is picked; a label only, it
   // changes nothing about stock or payment.
@@ -123,6 +130,7 @@ export default function SellFlow({
     setError(null);
     setSale(null);
     setCopied(false);
+    setMessageCopied(false);
     setEmailOpen(false);
     if (!keepCustomer) {
       setCustomer('');
@@ -232,6 +240,8 @@ export default function SellFlow({
 
     setBusy(false);
     setSale({
+      orderId: data.id,
+      customerEmail: email.trim() || null,
       productName: product.name,
       size: chosen.size,
       customerName: name,
@@ -258,6 +268,44 @@ export default function SellFlow({
     } catch {
       setError('Could not copy — press and hold the link instead.');
     }
+  }
+
+  // Same message and record as the Orders row ⋯ menu. Clipboard and share
+  // are called before any await so iOS still sees the tap.
+  function saleMessage(s: Sale): string {
+    return buildPaymentMessage({
+      customerName: s.customerName,
+      productName: s.productName,
+      size: s.size,
+      quantity: 1,
+      unitPrice: s.price,
+      paymentUrl: s.paymentUrl as string,
+      email: s.customerEmail,
+      collected: s.takenNow,
+    });
+  }
+
+  async function recordLinkShared(s: Sale, via: 'copied' | 'shared') {
+    await supabase
+      .from('orders')
+      .update({ link_shared_at: new Date().toISOString(), link_shared_via: via })
+      .eq('id', s.orderId);
+  }
+
+  async function copyMessage(s: Sale) {
+    if (!(await copyText(saleMessage(s)))) {
+      setError('Could not copy the message.');
+      return;
+    }
+    setMessageCopied(true);
+    setTimeout(() => setMessageCopied(false), 2000);
+    recordLinkShared(s, 'copied');
+  }
+
+  async function shareMessage(s: Sale) {
+    const result = await shareText(saleMessage(s));
+    if (result === 'failed') setError('Could not open sharing.');
+    if (result === 'shared') recordLinkShared(s, 'shared');
   }
 
   return (
@@ -594,6 +642,14 @@ export default function SellFlow({
                 >
                   {copied ? 'Copied' : 'Copy link'}
                 </button>
+                <button className="sell-secondary sell-big" onClick={() => copyMessage(sale)}>
+                  {messageCopied ? 'Copied' : 'Copy payment message'}
+                </button>
+                {shareSupported && (
+                  <button className="sell-secondary sell-big" onClick={() => shareMessage(sale)}>
+                    Share…
+                  </button>
+                )}
               </div>
             ) : (
               <p className="sell-note">
