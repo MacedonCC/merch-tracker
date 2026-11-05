@@ -18,18 +18,32 @@ export interface SellItem {
 
 type Step = 'product' | 'size' | 'who' | 'pay' | 'timing' | 'done';
 
-interface Sale {
-  orderId: string;
-  customerEmail: string | null;
+/** One item of the sale being built: a stock line and how many. */
+interface CartLine {
+  item: SellItem;
+  quantity: number;
+}
+
+interface SaleLine {
   productName: string;
   size: string;
-  customerName: string;
+  quantity: number;
   price: number;
-  method: 'cash' | 'link';
-  /** Payment-link sales only: did they walk away with it? */
-  takenNow: boolean;
-  backorder: boolean;
   paymentUrl: string | null;
+  handedOver: boolean;
+  /** Not enough in the cupboard, so the row was left owed. */
+  owed: boolean;
+}
+
+interface Sale {
+  saleId: string;
+  customerEmail: string | null;
+  customerName: string;
+  method: 'cash' | 'link';
+  lines: SaleLine[];
+  total: number;
+  /** Payment-link sales only: did they walk away with anything? */
+  takenNow: boolean;
   handoverFailed: boolean;
   /** null when no email was attempted (no address, or no shop link). */
   emailTo: string | null;
@@ -59,6 +73,25 @@ function stepIndex(step: Step): number {
   return STEP_LABELS.findIndex(([s]) => s === step);
 }
 
+// A line is handed over only if the whole quantity is in the cupboard.
+// It is never split into a handed-over part and an owed part: the
+// payment-link matcher pairs a Wix line with a row of the same quantity,
+// so one row per item has to stay one row.
+function isShort(line: CartLine): boolean {
+  return line.quantity > line.item.available;
+}
+
+// crypto.randomUUID needs a secure context; the fallback covers an
+// older WebView, which is the one place /sell could meet one.
+function newSaleId(): string {
+  if (typeof crypto.randomUUID === 'function') return crypto.randomUUID();
+  const b = crypto.getRandomValues(new Uint8Array(16));
+  b[6] = (b[6] & 0x0f) | 0x40;
+  b[8] = (b[8] & 0x3f) | 0x80;
+  const h = Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
+}
+
 export default function SellFlow({
   items,
   customers,
@@ -73,7 +106,9 @@ export default function SellFlow({
   const [step, setStep] = useState<Step>('product');
   const [showAll, setShowAll] = useState(false);
   const [product, setProduct] = useState<Product | null>(null);
-  const [chosen, setChosen] = useState<SellItem | null>(null);
+  const [cart, setCart] = useState<CartLine[]>([]);
+  // Index of the cart line whose size is being changed, if any.
+  const [editing, setEditing] = useState<number | null>(null);
   const [customer, setCustomer] = useState('');
   const [email, setEmail] = useState('');
   const [emailOpen, setEmailOpen] = useState(false);
@@ -82,8 +117,8 @@ export default function SellFlow({
   const [sale, setSale] = useState<Sale | null>(null);
   const [copied, setCopied] = useState(false);
   const [messageCopied, setMessageCopied] = useState(false);
-  // Juniors / Seniors: who manages this order's handover (orders.order_group).
-  // Defaults from the size each time one is picked; a label only, it
+  // Juniors / Seniors: who manages this sale's handovers (orders.order_group).
+  // Defaults from the size of the first item picked; a label only, it
   // changes nothing about stock or payment.
   const [group, setGroup] = useState<'juniors' | 'seniors'>('seniors');
 
@@ -121,10 +156,14 @@ export default function SellFlow({
     return matches.slice(0, 6);
   }, [customer, customers]);
 
+  const total = cart.reduce((sum, l) => sum + l.item.price * l.quantity, 0);
+  const allShort = cart.length > 0 && cart.every(isShort);
+
   function reset(keepCustomer: boolean) {
     setStep('product');
     setProduct(null);
-    setChosen(null);
+    setCart([]);
+    setEditing(null);
     setError(null);
     setSale(null);
     setCopied(false);
@@ -136,8 +175,53 @@ export default function SellFlow({
     }
   }
 
+  // A size tapped: either a new line, one more of a line already in the
+  // sale, or the new size for the line being edited. The same stock line
+  // never appears twice, so each becomes exactly one order row.
+  function pickSize(s: SellItem) {
+    setCart((prev) => {
+      if (editing !== null && prev[editing]) {
+        const edited = { ...prev[editing], item: s };
+        const dup = prev.findIndex((l, i) => i !== editing && l.item.id === s.id);
+        if (dup === -1) return prev.map((l, i) => (i === editing ? edited : l));
+        return prev
+          .map((l, i) => (i === dup ? { ...l, quantity: l.quantity + edited.quantity } : l))
+          .filter((_, i) => i !== editing);
+      }
+      const existing = prev.findIndex((l) => l.item.id === s.id);
+      if (existing !== -1) {
+        return prev.map((l, i) => (i === existing ? { ...l, quantity: l.quantity + 1 } : l));
+      }
+      return [...prev, { item: s, quantity: 1 }];
+    });
+    if (cart.length === 0) setGroup(/^JNR/i.test(s.size) ? 'juniors' : 'seniors');
+    setEditing(null);
+    setStep('who');
+  }
+
+  function setQuantity(index: number, quantity: number) {
+    setCart((prev) => prev.map((l, i) => (i === index ? { ...l, quantity: Math.max(1, quantity) } : l)));
+  }
+
+  function removeLine(index: number) {
+    const next = cart.filter((_, i) => i !== index);
+    setCart(next);
+    if (next.length === 0) {
+      setProduct(null);
+      setStep('product');
+    }
+  }
+
+  function editLine(index: number) {
+    const p = products.find((x) => x.name === cart[index].item.name);
+    if (!p) return;
+    setProduct(p);
+    setEditing(index);
+    setStep('size');
+  }
+
   async function record(method: 'cash' | 'link', takenNow = false) {
-    if (!chosen || !product) return;
+    if (cart.length === 0) return;
     // Normalised, not just trimmed: a name typed on a phone can pick up
     // a double space mid-string as easily as a trailing one.
     const name = tidyName(customer);
@@ -150,48 +234,54 @@ export default function SellFlow({
     setBusy(true);
     setError(null);
 
-    const backorder = chosen.available <= 0;
+    const saleId = newSaleId();
     const now = new Date().toISOString();
+    const address = email.trim();
     // Cash always leaves with them. A payment-link sale only does when
-    // the coach said so — and never on a back-order, where there is
-    // nothing in the cupboard to walk away with.
-    const handedOver = (method === 'cash' || takenNow) && !backorder;
+    // the coach said so — and never for a line short of stock, where
+    // there is not enough in the cupboard to walk away with.
+    const handsOver = (l: CartLine) => (method === 'cash' || takenNow) && !isShort(l);
 
-    // Cash takes the money now; a payment link leaves it owing. The
-    // method records what the money did, so a link is 'online' even
-    // while the payment is still pending.
+    // One row per item, all in one insert, so a sale is saved whole or
+    // not at all. Cash takes the money now; a payment link leaves it
+    // owing. The method records what the money did, so a link is
+    // 'online' even while the payment is still pending.
     const { data, error: insertError } = await supabase
       .from('orders')
-      .insert({
-        customer_name: name,
-        customer_email: email.trim() || null,
-        stock_item_id: chosen.id,
-        quantity: 1,
-        unit_price: chosen.price,
-        payment_status: method === 'cash' ? 'paid' : 'pending',
-        payment_method: method === 'cash' ? 'cash' : 'online',
-        source: 'manual',
-        order_group: group,
-        ordered_at: now,
-      })
-      .select('id')
-      .single();
+      .insert(
+        cart.map((l) => ({
+          customer_name: name,
+          customer_email: address || null,
+          stock_item_id: l.item.id,
+          quantity: l.quantity,
+          unit_price: l.item.price,
+          payment_status: method === 'cash' ? 'paid' : 'pending',
+          payment_method: method === 'cash' ? 'cash' : 'online',
+          source: 'manual',
+          order_group: group,
+          ordered_at: now,
+          sale_id: saleId,
+        })),
+      )
+      .select('id, stock_item_id');
 
-    if (insertError || !data) {
+    if (insertError || !data || data.length !== cart.length) {
       setBusy(false);
       setError(insertError?.message ?? 'Could not record the sale.');
       return;
     }
+    const rowFor = new Map(data.map((r) => [r.stock_item_id as string, r.id as string]));
 
     // Stock only moves on an UPDATE that sets distributed_at — no INSERT
     // trigger on orders moves stock (see CLAUDE.md). Inserting with
     // distributed_at already set would hand the garment over without
     // ever reducing stock, so the handover must be a second write.
     //
-    // A back-order is deliberately NOT handed over: there is nothing in
-    // the cupboard to give, so it stays owed and stock stays put.
+    // A line short of stock is deliberately NOT handed over: it stays
+    // owed and stock stays put.
     let handoverFailed = false;
-    if (handedOver) {
+    const handIds = cart.filter(handsOver).map((l) => rowFor.get(l.item.id) as string);
+    if (handIds.length > 0) {
       const { error: handoverError } = await supabase
         .from('orders')
         .update({
@@ -202,18 +292,16 @@ export default function SellFlow({
               ? 'Sold at the ground'
               : 'Taken at the ground, paying online',
         })
-        .eq('id', data.id);
+        .in('id', handIds);
       handoverFailed = !!handoverError;
     }
 
     // Every payment-link sale goes through the send route, even with no
-    // address or no shop page: the route records the outcome on the order
-    // ("Link emailed" or "Link not sent: <why>"), and skipping the call
-    // here used to leave those orders saying nothing at all. The order is
-    // already saved by this point, so a mail failure is reported and never
-    // rolls anything back — losing a sale because SMTP was down would be
-    // far worse than a parent having to be sent the link by text.
-    const address = email.trim();
+    // address or no shop page: the route records the outcome on every
+    // row of the sale ("Link emailed" or "Link not sent: <why>"). One
+    // call per sale, not per item — the route gathers the sale's rows
+    // itself from sale_id. The order is already saved by this point, so
+    // a mail failure is reported and never rolls anything back.
     let emailSent = false;
     let emailReason: string | null = null;
 
@@ -222,7 +310,7 @@ export default function SellFlow({
         const res = await fetch('/api/send-payment-link', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ orderId: data.id }),
+          body: JSON.stringify({ orderId: data[0].id }),
         });
         const result = await res.json();
         emailSent = !!result.sent;
@@ -232,26 +320,33 @@ export default function SellFlow({
         // note from here instead; if the connection is gone this fails
         // too, and the done screen still says the email did not send.
         emailReason = 'No connection while sending.';
-        await supabase.from('orders').update({ email_error: emailReason }).eq('id', data.id);
+        await supabase.from('orders').update({ email_error: emailReason }).eq('sale_id', saleId);
       }
     }
 
+    const lines: SaleLine[] = cart.map((l) => ({
+      productName: l.item.name,
+      size: l.item.size,
+      quantity: l.quantity,
+      price: l.item.price,
+      paymentUrl: l.item.wix_product_url,
+      handedOver: handsOver(l),
+      owed: isShort(l),
+    }));
+
     setBusy(false);
     setSale({
-      orderId: data.id,
-      customerEmail: email.trim() || null,
-      productName: product.name,
-      size: chosen.size,
+      saleId,
+      customerEmail: address || null,
       customerName: name,
-      price: chosen.price,
       method,
-      takenNow: handedOver && method === 'link',
-      backorder,
-      paymentUrl: chosen.wix_product_url,
+      lines,
+      total,
+      takenNow: method === 'link' && lines.some((l) => l.handedOver),
       handoverFailed,
       // Only where an email was really attempted; no shop page has its
       // own note on the done screen.
-      emailTo: method === 'link' && address && chosen.wix_product_url ? address : null,
+      emailTo: method === 'link' && address && lines.some((l) => l.paymentUrl) ? address : null,
       emailSent,
       emailReason,
     });
@@ -268,18 +363,21 @@ export default function SellFlow({
     }
   }
 
-  // Same message and record as the Orders row ⋯ menu. The clipboard is
-  // written before any await so iOS still sees the tap.
+  // Same message and record as the Orders row ⋯ menu, covering every
+  // item in the sale. The clipboard is written before any await so iOS
+  // still sees the tap.
   function saleMessage(s: Sale): string {
     return buildPaymentMessage({
       customerName: s.customerName,
-      productName: s.productName,
-      size: s.size,
-      quantity: 1,
-      unitPrice: s.price,
-      paymentUrl: s.paymentUrl as string,
       email: s.customerEmail,
-      collected: s.takenNow,
+      items: s.lines.map((l) => ({
+        productName: l.productName,
+        size: l.size,
+        quantity: l.quantity,
+        unitPrice: l.price,
+        paymentUrl: l.paymentUrl,
+        collected: l.handedOver,
+      })),
     });
   }
 
@@ -287,7 +385,7 @@ export default function SellFlow({
     await supabase
       .from('orders')
       .update({ link_shared_at: new Date().toISOString(), link_shared_via: via })
-      .eq('id', s.orderId);
+      .eq('sale_id', s.saleId);
   }
 
   async function copyMessage(s: Sale) {
@@ -299,6 +397,18 @@ export default function SellFlow({
     setTimeout(() => setMessageCopied(false), 2000);
     recordLinkShared(s, 'copied');
   }
+
+  const lineLabel = (l: { quantity: number; productName: string; size: string }) =>
+    `${l.quantity > 1 ? `${l.quantity} × ` : ''}${l.productName} · ${l.size}`;
+
+  // The sale in one line, under each heading from Who onwards.
+  const summary =
+    cart.length === 1
+      ? `${lineLabel({ quantity: cart[0].quantity, productName: cart[0].item.name, size: cart[0].item.size })} · ${money(total)}`
+      : `${cart.reduce((n, l) => n + l.quantity, 0)} items · ${money(total)}`;
+
+  const shortLines = cart.filter(isShort);
+  const noPage = cart.filter((l) => !l.item.wix_product_url);
 
   return (
     <div className="sell">
@@ -323,7 +433,12 @@ export default function SellFlow({
 
       {step === 'product' && (
         <section>
-          <h2 className="sell-h">What are they taking?</h2>
+          <h2 className="sell-h">{cart.length > 0 ? 'What else are they taking?' : 'What are they taking?'}</h2>
+          {cart.length > 0 && (
+            <button className="sell-ghost" onClick={() => setStep('who')}>
+              &larr; Back to the sale ({summary})
+            </button>
+          )}
           <div className="sell-grid">
             {visibleProducts.map((p) => (
               <button
@@ -370,7 +485,7 @@ export default function SellFlow({
       {step === 'size' && product && (
         <section>
           <h2 className="sell-h">{product.name}</h2>
-          <p className="sell-sub">Which size?</p>
+          <p className="sell-sub">{editing !== null ? 'Change to which size?' : 'Which size?'}</p>
           <div className="sell-chips">
             {[...product.sizes]
               .sort((a, b) => sizeRank(a.size) - sizeRank(b.size))
@@ -381,11 +496,7 @@ export default function SellFlow({
                     key={s.id}
                     className="sell-chip"
                     data-out={out}
-                    onClick={() => {
-                      setChosen(s);
-                      setGroup(/^JNR/i.test(s.size) ? 'juniors' : 'seniors');
-                      setStep('who');
-                    }}
+                    onClick={() => pickSize(s)}
                   >
                     <span className="sell-chip-size">{s.size}</span>
                     <span className="sell-chip-count">
@@ -399,18 +510,84 @@ export default function SellFlow({
             Greyed sizes have none in the cupboard. You can still sell one — it
             is recorded as owed and nothing is handed over.
           </p>
-          <button className="sell-ghost" onClick={() => reset(true)}>
-            &larr; Different item
-          </button>
+          {editing !== null ? (
+            <button
+              className="sell-ghost"
+              onClick={() => {
+                setEditing(null);
+                setStep('who');
+              }}
+            >
+              &larr; Keep the size it was
+            </button>
+          ) : (
+            <button
+              className="sell-ghost"
+              onClick={() => {
+                setProduct(null);
+                setStep('product');
+              }}
+            >
+              &larr; Different item
+            </button>
+          )}
         </section>
       )}
 
-      {step === 'who' && chosen && (
+      {step === 'who' && cart.length > 0 && (
         <section>
           <h2 className="sell-h">Who is it for?</h2>
-          <p className="sell-sub">
-            {chosen.name} · {chosen.size} · {money(chosen.price)}
-          </p>
+
+          <ul className="sell-lines" aria-label="Items in this sale">
+            {cart.map((l, i) => {
+              const avail = Math.max(0, l.item.available);
+              return (
+                <li key={l.item.id} className="sell-line" data-short={isShort(l)}>
+                  <button
+                    className="sell-line-main"
+                    onClick={() => editLine(i)}
+                    aria-label={`${l.item.name} ${l.item.size}, change size`}
+                  >
+                    <span className="sell-line-name">{l.item.name}</span>
+                    <span className="sell-line-meta">
+                      <span className="size-pill">{l.item.size}</span> {money(l.item.price)}
+                      {isShort(l) && (
+                        <span className="sell-line-short">
+                          {avail === 0 ? ' · back-order' : ` · only ${avail} in stock`}
+                        </span>
+                      )}
+                    </span>
+                  </button>
+                  <div className="sell-qty" role="group" aria-label={`Quantity of ${l.item.name} ${l.item.size}`}>
+                    {l.quantity === 1 ? (
+                      <button className="sell-qty-btn" onClick={() => removeLine(i)} aria-label="Remove">
+                        &times;
+                      </button>
+                    ) : (
+                      <button className="sell-qty-btn" onClick={() => setQuantity(i, l.quantity - 1)} aria-label="One fewer">
+                        &minus;
+                      </button>
+                    )}
+                    <span className="sell-qty-n" aria-live="polite">{l.quantity}</span>
+                    <button className="sell-qty-btn" onClick={() => setQuantity(i, l.quantity + 1)} aria-label="One more">
+                      +
+                    </button>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+          <button
+            className="sell-ghost sell-add"
+            onClick={() => {
+              setProduct(null);
+              setEditing(null);
+              setStep('product');
+            }}
+          >
+            + Add another item
+          </button>
+
           <input
             className="sell-input"
             type="text"
@@ -476,31 +653,33 @@ export default function SellFlow({
               setStep('pay');
             }}
           >
-            Continue
-          </button>
-          <button className="sell-ghost" onClick={() => setStep('size')}>
-            &larr; Different size
+            Continue · {money(total)}
           </button>
         </section>
       )}
 
-      {step === 'pay' && chosen && (
+      {step === 'pay' && cart.length > 0 && (
         <section>
           <h2 className="sell-h">How are they paying?</h2>
           <p className="sell-sub">
-            {chosen.name} · {chosen.size} · {money(chosen.price)} · {customer.trim()}
+            {summary} · {customer.trim()}
           </p>
-          {chosen.available <= 0 && (
+          {shortLines.length > 0 && (
             <p className="sell-warn">
-              None in stock. This is recorded as owed, and nothing is handed
-              over today.
+              {cart.length === 1 && cart[0].item.available <= 0
+                ? 'None in stock. This is recorded as owed, and nothing is handed over today.'
+                : `Not enough in stock: ${shortLines
+                    .map((l) => `${l.item.name} ${l.item.size} (${Math.max(0, l.item.available)} of ${l.quantity})`)
+                    .join(', ')}. ${shortLines.length === 1 ? 'That line is' : 'Those lines are'} recorded as owed and not handed over today; hand ${shortLines.length === 1 ? 'it' : 'them'} over from Orders when the stock arrives.`}
             </p>
           )}
-          {!chosen.wix_product_url && (
+          {noPage.length > 0 && (
             <p className="sell-warn">
-              This item has no shop page recorded, so a payment link cannot
-              be sent. Take cash, or the sale is saved as owing with no link
-              to give them.
+              {noPage.length === cart.length
+                ? cart.length === 1
+                  ? 'This item has no shop page recorded, so a payment link cannot be sent. Take cash, or the sale is saved as owing with no link to give them.'
+                  : 'None of these items has a shop page recorded, so a payment link cannot be sent. Take cash, or the sale is saved as owing with no link to give them.'
+                : `${noPage.map((l) => `${l.item.name} ${l.item.size}`).join(', ')} ${noPage.length === 1 ? 'has' : 'have'} no shop page, so the payment link will list ${noPage.length === 1 ? 'it' : 'them'} without a link.`}
             </p>
           )}
           <button
@@ -508,15 +687,15 @@ export default function SellFlow({
             disabled={busy}
             onClick={() => record('cash')}
           >
-            {busy ? 'Saving…' : `Paid — cash ${money(chosen.price)}`}
+            {busy ? 'Saving…' : `Paid — cash ${money(total)}`}
           </button>
           <button
             className="sell-secondary sell-big"
             disabled={busy}
             onClick={() => {
-              // Nothing in the cupboard means nothing to take now, so
-              // the question would be a trap. Record it as owed.
-              if (chosen.available <= 0) record('link');
+              // Nothing that can leave today means nothing to take now,
+              // so the question would be a trap. Record it as owed.
+              if (allShort) record('link');
               else setStep('timing');
             }}
           >
@@ -528,12 +707,17 @@ export default function SellFlow({
         </section>
       )}
 
-      {step === 'timing' && chosen && (
+      {step === 'timing' && cart.length > 0 && (
         <section>
-          <h2 className="sell-h">Are they taking it now?</h2>
+          <h2 className="sell-h">{cart.length > 1 ? 'Are they taking them now?' : 'Are they taking it now?'}</h2>
           <p className="sell-sub">
-            {chosen.name} · {chosen.size} · {money(chosen.price)} · {customer.trim()}
+            {summary} · {customer.trim()}
           </p>
+          {shortLines.length > 0 && (
+            <p className="sell-note">
+              Anything short of stock stays owed either way and is not handed over.
+            </p>
+          )}
           <button
             className="sell-primary sell-big"
             disabled={busy}
@@ -556,106 +740,134 @@ export default function SellFlow({
         </section>
       )}
 
-      {step === 'done' && sale && (
-        <section>
-          <div
-            className="sell-done"
-            data-owed={sale.backorder || sale.method === 'link'}
-          >
-            <span className="sell-done-badge">
-              {sale.backorder
-                ? 'OWED — not handed over'
-                : sale.method === 'cash'
-                  ? 'Handed over'
-                  : sale.takenNow
-                    ? 'TAKEN — payment owed'
-                    : 'Awaiting payment'}
-            </span>
-            <h2 className="sell-done-title">
-              {sale.productName} · {sale.size}
-            </h2>
-            <p className="sell-done-who">for {sale.customerName}</p>
-            <p className="sell-done-detail">
-              {sale.method === 'cash'
-                ? `Cash ${money(sale.price)} taken`
-                : `${money(sale.price)} to pay online`}
-            </p>
-
-            {sale.backorder && (
-              <p className="sell-done-warn">
-                Nothing was handed over. {sale.customerName} is still owed one{' '}
-                {sale.productName} in {sale.size}. It shows in Orders as waiting
-                on stock.
+      {step === 'done' && sale && (() => {
+        const owedLines = sale.lines.filter((l) => l.owed);
+        const allOwed = owedLines.length === sale.lines.length;
+        const single = sale.lines.length === 1 ? sale.lines[0] : null;
+        const anyPage = sale.lines.some((l) => l.paymentUrl);
+        return (
+          <section>
+            <div
+              className="sell-done"
+              data-owed={owedLines.length > 0 || sale.method === 'link'}
+            >
+              <span className="sell-done-badge">
+                {allOwed
+                  ? 'OWED — not handed over'
+                  : sale.method === 'cash'
+                    ? owedLines.length > 0 ? 'Paid — some still owed' : 'Handed over'
+                    : sale.takenNow
+                      ? 'TAKEN — payment owed'
+                      : 'Awaiting payment'}
+              </span>
+              <h2 className="sell-done-title">
+                {single ? lineLabel(single) : `${sale.lines.reduce((n, l) => n + l.quantity, 0)} items`}
+              </h2>
+              <p className="sell-done-who">for {sale.customerName}</p>
+              <p className="sell-done-detail">
+                {sale.method === 'cash'
+                  ? `Cash ${money(sale.total)} taken`
+                  : `${money(sale.total)} to pay online`}
               </p>
-            )}
 
-            {sale.takenNow && (
-              <p className="sell-done-warn">
-                {sale.customerName} has taken this with them and still owes{' '}
-                {money(sale.price)}. It shows in Orders under
-                &ldquo;Has gear, unpaid&rdquo; until the payment lands.
-              </p>
-            )}
+              {!single && (
+                <ul className="sell-done-items">
+                  {sale.lines.map((l) => (
+                    <li key={`${l.productName}|${l.size}`}>
+                      <span>{lineLabel(l)}</span>
+                      <span className="sell-done-item-state" data-owed={l.owed}>
+                        {l.owed ? 'Owed' : l.handedOver ? 'Handed over' : 'Held'}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
 
-            {sale.handoverFailed && (
-              <p className="sell-done-warn">
-                The sale was recorded, but marking it handed over failed. Open
-                Orders and hand it over there, or stock will be wrong.
-              </p>
-            )}
+              {owedLines.length > 0 && (
+                <p className="sell-done-warn">
+                  {single
+                    ? `Nothing was handed over. ${sale.customerName} is still owed ${single.quantity > 1 ? single.quantity : 'one'} ${single.productName} in ${single.size}. It shows in Orders as waiting on stock.`
+                    : `Not handed over: ${owedLines.map((l) => `${l.productName} ${l.size}`).join(', ')}. ${sale.customerName} is still owed ${owedLines.length === 1 ? 'it' : 'these'}; ${owedLines.length === 1 ? 'it shows' : 'they show'} in Orders as waiting on stock.`}
+                </p>
+              )}
 
-            {sale.emailTo && sale.emailSent && (
-              <p className="sell-done-sent">Payment link emailed to {sale.emailTo}</p>
-            )}
+              {sale.takenNow && (
+                <p className="sell-done-warn">
+                  {sale.customerName} has taken {single ? 'this' : 'the handed-over items'} with them and still owes{' '}
+                  {money(sale.total)}. {single ? 'It shows' : 'They show'} in Orders under
+                  &ldquo;Has gear, unpaid&rdquo; until the payment lands.
+                </p>
+              )}
 
-            {sale.emailTo && !sale.emailSent && (
-              <p className="sell-done-warn">
-                The order is saved, but the email did not send
-                {sale.emailReason ? ` (${sale.emailReason})` : ''}. Copy the link
-                below and text it to them instead.
-              </p>
-            )}
-          </div>
+              {sale.handoverFailed && (
+                <p className="sell-done-warn">
+                  The sale was recorded, but marking it handed over failed. Open
+                  Orders and hand it over there, or stock will be wrong.
+                </p>
+              )}
 
-          {sale.method === 'link' &&
-            (sale.paymentUrl ? (
-              <div className="sell-link">
-                <a
-                  href={sale.paymentUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="sell-link-url"
-                >
-                  {sale.paymentUrl}
-                </a>
-                <button
-                  className="sell-secondary sell-big"
-                  onClick={() => copyLink(sale.paymentUrl as string)}
-                >
-                  <CopyIcon />
-                  {copied ? 'Copied' : 'Copy link'}
-                </button>
-                <button className="sell-secondary sell-big" onClick={() => copyMessage(sale)}>
-                  <CopyIcon />
-                  {messageCopied ? 'Copied' : 'Copy payment message'}
-                </button>
-              </div>
-            ) : (
-              <p className="sell-note">
-                This item has no shop page recorded, so there is no link to
-                send. Take payment another way; an admin can run the Wix
-                media sync to add the shop page.
-              </p>
-            ))}
+              {sale.emailTo && sale.emailSent && (
+                <p className="sell-done-sent">
+                  Payment {single ? 'link' : 'links'} emailed to {sale.emailTo}
+                </p>
+              )}
 
-          <button className="sell-primary sell-big" onClick={() => reset(true)}>
-            Sell another to {sale.customerName}
-          </button>
-          <button className="sell-ghost" onClick={() => reset(false)}>
-            Done — new customer
-          </button>
-        </section>
-      )}
+              {sale.emailTo && !sale.emailSent && (
+                <p className="sell-done-warn">
+                  The order is saved, but the email did not send
+                  {sale.emailReason ? ` (${sale.emailReason})` : ''}. Copy the{' '}
+                  {single ? 'link' : 'payment message'} below and text it to them instead.
+                </p>
+              )}
+            </div>
+
+            {sale.method === 'link' &&
+              (single?.paymentUrl ? (
+                <div className="sell-link">
+                  <a
+                    href={single.paymentUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="sell-link-url"
+                  >
+                    {single.paymentUrl}
+                  </a>
+                  <button
+                    className="sell-secondary sell-big"
+                    onClick={() => copyLink(single.paymentUrl as string)}
+                  >
+                    <CopyIcon />
+                    {copied ? 'Copied' : 'Copy link'}
+                  </button>
+                  <button className="sell-secondary sell-big" onClick={() => copyMessage(sale)}>
+                    <CopyIcon />
+                    {messageCopied ? 'Copied' : 'Copy payment message'}
+                  </button>
+                </div>
+              ) : !single && anyPage ? (
+                <div className="sell-link">
+                  <button className="sell-secondary sell-big" onClick={() => copyMessage(sale)}>
+                    <CopyIcon />
+                    {messageCopied ? 'Copied' : 'Copy payment message'}
+                  </button>
+                </div>
+              ) : (
+                <p className="sell-note">
+                  {single ? 'This item has no shop page' : 'None of these items has a shop page'} recorded, so there is no link to
+                  send. Take payment another way; an admin can run the Wix
+                  media sync to add the shop page.
+                </p>
+              ))}
+
+            <button className="sell-primary sell-big" onClick={() => reset(true)}>
+              Sell another to {sale.customerName}
+            </button>
+            <button className="sell-ghost" onClick={() => reset(false)}>
+              Done — new customer
+            </button>
+          </section>
+        );
+      })()}
     </div>
   );
 }

@@ -142,21 +142,10 @@ export function paymentLinkText(input: PaymentLinkEmailInput): string {
   ].join('\n');
 }
 
-export function paymentLinkHtml(input: PaymentLinkEmailInput): string {
-  const total = money(input.unitPrice * input.quantity);
-  const name = escapeHtml(firstName(input.customerName));
-  const product = escapeHtml(input.productName);
-  const size = escapeHtml(input.size);
-  const url = escapeHtml(input.paymentUrl);
-  const buttonLabel = `Pay ${total} online`;
-
-  const detailRow = (label: string, value: string) => `
-              <tr>
-                <td style="padding:6px 0;font-size:14px;color:${MUTED};width:70px;" valign="top">${label}</td>
-                <td style="padding:6px 0;font-size:14px;color:${INK};font-weight:600;" valign="top">${value}</td>
-              </tr>`;
-
-  const logoImg = input.hasLogo
+// The card, masthead and contact footer every payment email shares;
+// `content` is everything between the greeting and the footer.
+function emailShell(name: string, preheader: string, hasLogo: boolean, content: string): string {
+  const logo = hasLogo
     ? `<img src="cid:${LOGO_CID}" alt="Macedon Cricket Club" width="104" height="106"
                        style="display:block;border:0;outline:none;width:104px;height:106px;margin:0 auto 10px auto;" />`
     : '';
@@ -173,7 +162,7 @@ export function paymentLinkHtml(input: PaymentLinkEmailInput): string {
 </head>
 <body style="margin:0;padding:0;background-color:${PAGE};">
   <div style="display:none;max-height:0;overflow:hidden;opacity:0;">
-    ${total} to pay &middot; tap the button to pay online
+    ${preheader}
   </div>
 
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
@@ -188,7 +177,7 @@ export function paymentLinkHtml(input: PaymentLinkEmailInput): string {
             <td align="center" bgcolor="#ffffff"
                 style="background-color:#ffffff;padding:26px 24px 18px 24px;border-radius:8px 8px 0 0;
                        font-family:Arial,Helvetica,sans-serif;">
-              ${logoImg}
+              ${logo}
               <div style="font-family:Arial,Helvetica,sans-serif;font-size:19px;font-weight:bold;
                           letter-spacing:4px;text-transform:uppercase;color:${INK};line-height:26px;">
                 Macedon&nbsp;Cricket&nbsp;Club
@@ -207,7 +196,46 @@ export function paymentLinkHtml(input: PaymentLinkEmailInput): string {
               <p style="margin:0 0 14px 0;font-family:Arial,Helvetica,sans-serif;font-size:22px;
                  font-weight:bold;color:${INK};">Thanks, ${name}</p>
 
-              <p style="margin:0 0 18px 0;font-family:Arial,Helvetica,sans-serif;font-size:15px;
+${content}              <div style="height:1px;background-color:${LINE};line-height:1px;font-size:0;">&nbsp;</div>
+
+              <p style="margin:18px 0 0 0;font-family:Arial,Helvetica,sans-serif;font-size:13px;
+                 line-height:20px;color:${MUTED};">
+                Questions? ${CONTACT_NAME}<br />
+                ${CONTACT_PHONE}<br />
+                <a href="mailto:${CONTACT_EMAIL}" style="color:${MUTED};">${CONTACT_EMAIL}</a>
+              </p>
+
+            </td>
+          </tr>
+        </table>
+
+        <p style="margin:14px 0 0 0;font-family:Arial,Helvetica,sans-serif;font-size:11px;color:${MUTED};">
+          Macedon Cricket Club merchandise
+        </p>
+
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+}
+
+export function paymentLinkHtml(input: PaymentLinkEmailInput): string {
+  const total = money(input.unitPrice * input.quantity);
+  const name = escapeHtml(firstName(input.customerName));
+  const product = escapeHtml(input.productName);
+  const size = escapeHtml(input.size);
+  const url = escapeHtml(input.paymentUrl);
+  const buttonLabel = `Pay ${total} online`;
+
+  const detailRow = (label: string, value: string) => `
+              <tr>
+                <td style="padding:6px 0;font-size:14px;color:${MUTED};width:70px;" valign="top">${label}</td>
+                <td style="padding:6px 0;font-size:14px;color:${INK};font-weight:600;" valign="top">${value}</td>
+              </tr>`;
+
+
+  return emailShell(name, `${total} to pay &middot; tap the button to pay online`, input.hasLogo, `              <p style="margin:0 0 18px 0;font-family:Arial,Helvetica,sans-serif;font-size:15px;
                  line-height:22px;color:${INK};">Here&rsquo;s what you&rsquo;ve ordered:</p>
 
               <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
@@ -268,26 +296,146 @@ ${detailRow('Qty', String(input.quantity))}
                 <span style="word-break:break-all;color:${MUTED};">${url}</span>
               </p>
 
-              <div style="height:1px;background-color:${LINE};line-height:1px;font-size:0;">&nbsp;</div>
+`);
+}
 
-              <p style="margin:18px 0 0 0;font-family:Arial,Helvetica,sans-serif;font-size:13px;
-                 line-height:20px;color:${MUTED};">
-                Questions? ${CONTACT_NAME}<br />
-                ${CONTACT_PHONE}<br />
-                <a href="mailto:${CONTACT_EMAIL}" style="color:${MUTED};">${CONTACT_EMAIL}</a>
-              </p>
+// ---- Several items in one sale (orders.sale_id) ----
+//
+// A payment link only opens a product page, and Wix has no link that
+// fills a cart, so a sale of several items lists each one with its own
+// page and asks for one checkout using the address we match on. There
+// is no single big pay button: it could only point at one of the items.
+// Each item says whether they already have it; the rest use the same
+// collect-later wording as a single item, which must not say "reserved"
+// (see the note at the top).
 
-            </td>
-          </tr>
-        </table>
+export interface SaleEmailItem {
+  productName: string;
+  size: string;
+  quantity: number;
+  unitPrice: number;
+  /** null when the item has no shop page; it is still listed. */
+  paymentUrl: string | null;
+  /** Handed over already (distributed_at set on the unpaid row). */
+  takenNow: boolean;
+}
 
-        <p style="margin:14px 0 0 0;font-family:Arial,Helvetica,sans-serif;font-size:11px;color:${MUTED};">
-          Macedon Cricket Club merchandise
-        </p>
+export interface SaleEmailInput {
+  customerName: string;
+  email: string;
+  items: SaleEmailItem[];
+  hasLogo: boolean;
+}
 
-      </td>
-    </tr>
-  </table>
-</body>
-</html>`;
+const NO_LINK_TEXT = 'No online link for this one &mdash; we&rsquo;ll sort it with you.';
+
+function saleTotal(input: SaleEmailInput): string {
+  return money(input.items.reduce((sum, i) => sum + i.unitPrice * i.quantity, 0));
+}
+
+function checkoutLine(email: string): string {
+  return `Add each item to your cart, then check out once using ${email}.`;
+}
+
+export function saleEmailSubject(input: SaleEmailInput): string {
+  return `Your Macedon Cricket Club order — ${input.items.length} items`;
+}
+
+export function saleEmailText(input: SaleEmailInput): string {
+  const anyTaken = input.items.some((i) => i.takenNow);
+  const anyHeld = input.items.some((i) => !i.takenNow);
+  return [
+    'MACEDON CRICKET CLUB',
+    '',
+    `Thanks, ${firstName(input.customerName)}`,
+    '',
+    "Here's what you've ordered:",
+    '',
+    ...input.items.flatMap((i) => [
+      `  ${i.quantity} x ${i.productName} (${i.size}) - ${money(i.unitPrice * i.quantity)}` +
+        (i.takenNow ? ' - with you already' : ''),
+      `    ${i.paymentUrl ?? "No online link for this one - we'll sort it with you."}`,
+    ]),
+    '',
+    `  Total:  ${saleTotal(input)}`,
+    '',
+    checkoutLine(input.email),
+    '',
+    ...(anyTaken ? ["Anything marked 'with you already' you've taken home; please pay when you get a moment."] : []),
+    ...(anyHeld
+      ? [`Once your payment comes through we'll have ${anyTaken ? 'the rest' : 'everything'} ready to collect at the club. Bring nothing - we'll match it up with your name.`]
+      : []),
+    '',
+    `Questions? ${CONTACT_NAME}`,
+    CONTACT_PHONE,
+    CONTACT_EMAIL,
+    '',
+    '--',
+    'Macedon Cricket Club merchandise',
+  ].join('\n');
+}
+
+export function saleEmailHtml(input: SaleEmailInput): string {
+  const total = saleTotal(input);
+  const name = escapeHtml(firstName(input.customerName));
+  const anyTaken = input.items.some((i) => i.takenNow);
+  const anyHeld = input.items.some((i) => !i.takenNow);
+
+  const itemRow = (i: SaleEmailItem, last: boolean) => {
+    const url = i.paymentUrl ? escapeHtml(i.paymentUrl) : null;
+    const qty = i.quantity > 1 ? `${i.quantity} &times; ` : '';
+    const taken = i.takenNow
+      ? `<span style="font-size:12px;color:${MUTED};font-weight:normal;"> &middot; with you already</span>`
+      : '';
+    const link = url
+      ? `<a href="${url}" style="color:${RED};font-weight:bold;text-decoration:underline;">Add to cart &rarr;</a>`
+      : `<span style="color:${MUTED};">${NO_LINK_TEXT}</span>`;
+    return `
+                      <tr>
+                        <td style="padding:10px 0;font-size:14px;color:${INK};font-weight:600;${last ? '' : `border-bottom:1px solid ${LINE};`}" valign="top">
+                          ${qty}${escapeHtml(i.productName)} (${escapeHtml(i.size)})${taken}
+                          <div style="padding-top:4px;font-size:14px;font-weight:normal;">${link}</div>
+                        </td>
+                        <td align="right" style="padding:10px 0 10px 12px;font-size:14px;color:${INK};font-weight:600;white-space:nowrap;${last ? '' : `border-bottom:1px solid ${LINE};`}" valign="top">${money(i.unitPrice * i.quantity)}</td>
+                      </tr>`;
+  };
+
+  const content = `
+              <p style="margin:0 0 18px 0;font-family:Arial,Helvetica,sans-serif;font-size:15px;
+                 line-height:22px;color:${INK};">Here&rsquo;s what you&rsquo;ve ordered:</p>
+
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
+                     style="border:1px solid ${LINE};border-radius:6px;">
+                <tr>
+                  <td style="padding:4px 18px 14px 18px;font-family:Arial,Helvetica,sans-serif;">
+                    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+${input.items.map((i, n) => itemRow(i, n === input.items.length - 1)).join('')}
+                      <tr>
+                        <td colspan="2" style="padding:4px 0 0 0;">
+                          <div style="height:1px;background-color:${LINE};line-height:1px;font-size:0;">&nbsp;</div>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td style="padding:10px 0 0 0;font-size:14px;color:${MUTED};" valign="top">Total</td>
+                        <td align="right" style="padding:10px 0 0 0;font-size:18px;color:${INK};font-weight:bold;" valign="top">${total}</td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+              </table>
+
+              <p style="margin:22px 0 18px 0;font-family:Arial,Helvetica,sans-serif;font-size:16px;
+                 line-height:23px;color:${INK};font-weight:bold;">${escapeHtml(checkoutLine(input.email))}</p>
+${anyTaken ? `
+              <p style="margin:0 0 18px 0;font-family:Arial,Helvetica,sans-serif;font-size:15px;
+                 line-height:22px;color:${INK};">
+                Anything marked &ldquo;with you already&rdquo; you&rsquo;ve taken home &mdash; please pay when you get a moment.
+              </p>` : ''}${anyHeld ? `
+              <p style="margin:0 0 24px 0;font-family:Arial,Helvetica,sans-serif;font-size:15px;
+                 line-height:22px;color:${INK};">
+                Once your payment comes through we&rsquo;ll have ${anyTaken ? 'the rest' : 'everything'} ready to collect at the club. Bring nothing &mdash; we&rsquo;ll match it up with your name.
+              </p>` : ''}
+
+`;
+  return emailShell(name, `${total} to pay &middot; ${input.items.length} items`, input.hasLogo, content);
 }

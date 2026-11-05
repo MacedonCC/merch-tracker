@@ -136,6 +136,9 @@ interface OrderRow {
   order_group: OrderGroupName | null;
   // Display and search only (migration 20261015000004).
   wix_order_number: string | null;
+  // Shared by the rows of one /sell checkout (migration 20261105000002).
+  // Only the payment email and message read it.
+  sale_id?: string | null;
   stock_items?: { name: string; size: string; wix_product_url?: string | null } | null;
   // Only present when a different size was handed over than was
   // ordered — see "Hand over a different size" below.
@@ -366,8 +369,8 @@ function inGroup(o: OrderRow, f: GroupFilter): boolean {
 // The small tags under a row's date: Juniors/Seniors and the Wix order
 // number. Shared by the list and the grouped Ready view so the two
 // cannot drift.
-function OrderTags({ o }: { o: OrderRow }) {
-  if (!o.order_group && !o.wix_order_number) return null;
+function OrderTags({ o, saleSize = 1 }: { o: OrderRow; saleSize?: number }) {
+  if (!o.order_group && !o.wix_order_number && saleSize < 2) return null;
   return (
     <div className="order-tags">
       {o.order_group && (
@@ -376,6 +379,7 @@ function OrderTags({ o }: { o: OrderRow }) {
         </span>
       )}
       {o.wix_order_number && <span className="order-tag">Wix #{o.wix_order_number}</span>}
+      {saleSize > 1 && <span className="order-tag">Sale of {saleSize}</span>}
     </div>
   );
 }
@@ -824,11 +828,25 @@ export default function TrackerSection({
     load();
   }
 
-  // Admin-only. The server re-reads the order and rebuilds the same email
-  // /sell sends (including the "taken now" wording from distributed_at);
-  // the address is shown here so it can be checked before anything goes.
+  // The unpaid /sell rows of this order's sale (orders.sale_id), so one
+  // message or email covers everything still owed from one checkout.
+  // Paid rows are left out: they need no link. No sale_id is a sale of one.
+  function unpaidSaleRows(o: OrderRow): OrderRow[] {
+    if (!o.sale_id) return [o];
+    const rows = orders.filter(
+      (x) => x.sale_id === o.sale_id && x.source === 'manual' && x.payment_status === 'pending',
+    );
+    return rows.length > 0 ? rows : [o];
+  }
+
+  // Admin-only. The server re-reads the order and its sale and rebuilds
+  // the same email /sell sends (including the "taken now" wording from
+  // distributed_at); the address is shown here so it can be checked
+  // before anything goes.
   async function resendLink(o: OrderRow) {
-    if (!window.confirm(`Email the payment link for ${o.customer_name} to ${o.customer_email}?`)) return;
+    const n = unpaidSaleRows(o).length;
+    const what = n > 1 ? `the payment links for ${n} unpaid items` : 'the payment link';
+    if (!window.confirm(`Email ${what} for ${o.customer_name} to ${o.customer_email}?`)) return;
     try {
       const res = await fetch('/api/send-payment-link', {
         method: 'POST',
@@ -846,35 +864,41 @@ export default function TrackerSection({
   // Payment link by SMS / WhatsApp instead of email. The clipboard write
   // runs first, synchronously from the tap, since iOS refuses either
   // without a fresh user gesture; recording on the order comes after.
-  function paymentMessage(o: OrderRow): string | null {
-    const url = o.stock_items?.wix_product_url;
-    if (!url || !o.stock_items) return null;
+  function hasShopPage(o: OrderRow): boolean {
+    return unpaidSaleRows(o).some((x) => x.stock_items?.wix_product_url);
+  }
+
+  function paymentMessage(rows: OrderRow[]): string | null {
+    if (!rows.some((x) => x.stock_items?.wix_product_url)) return null;
     return buildPaymentMessage({
-      customerName: o.customer_name,
-      productName: o.stock_items.name,
-      size: o.stock_items.size,
-      quantity: o.quantity,
-      unitPrice: Number(o.unit_price) || 0,
-      paymentUrl: url,
-      email: o.customer_email,
-      collected: !!o.distributed_at,
+      customerName: rows[0].customer_name,
+      email: rows[0].customer_email,
+      items: rows.map((x) => ({
+        productName: x.stock_items?.name ?? 'Item',
+        size: x.stock_items?.size ?? '',
+        quantity: x.quantity,
+        unitPrice: Number(x.unit_price) || 0,
+        paymentUrl: x.stock_items?.wix_product_url ?? null,
+        collected: !!x.distributed_at,
+      })),
     });
   }
 
-  async function recordLinkShared(id: string, via: 'copied') {
+  async function recordLinkShared(ids: string[], via: 'copied') {
     await supabase
       .from('orders')
       .update({ link_shared_at: new Date().toISOString(), link_shared_via: via })
-      .eq('id', id);
+      .in('id', ids);
     load();
   }
 
   async function copyMessage(o: OrderRow) {
-    const text = paymentMessage(o);
+    const rows = unpaidSaleRows(o);
+    const text = paymentMessage(rows);
     if (!text) return;
     if (!(await copyText(text))) return flash('Could not copy the message.');
-    flash('Copied');
-    recordLinkShared(o.id, 'copied');
+    flash(rows.length > 1 ? `Copied (${rows.length} items)` : 'Copied');
+    recordLinkShared(rows.map((x) => x.id), 'copied');
   }
 
   async function removeOrder(id: string) {
@@ -886,6 +910,14 @@ export default function TrackerSection({
   }
 
   // ---- Derived -------------------------------------------------------
+  // How many rows each /sell checkout wrote, for the "Sale of 3" tag.
+  const saleSizes = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const o of orders) if (o.sale_id) counts.set(o.sale_id, (counts.get(o.sale_id) ?? 0) + 1);
+    return counts;
+  }, [orders]);
+  const saleSizeOf = (o: OrderRow) => (o.sale_id ? saleSizes.get(o.sale_id) ?? 1 : 1);
+
   // Memoised because classifyOrders() takes it as a dependency; a fresh
   // Map every render would defeat that memo.
   const byId = useMemo(() => new Map(stock.map((s) => [s.id, s])), [stock]);
@@ -1382,7 +1414,7 @@ export default function TrackerSection({
                         {n > 0 && formatDate(g.items[n - 1].ordered_at) === formatDate(i.ordered_at)
                           ? null
                           : formatDate(i.ordered_at)}
-                        <OrderTags o={i} />
+                        <OrderTags o={i} saleSize={saleSizeOf(i)} />
                       </td>
                       {n === 0 && (
                         <td className="orders-action order-group-action" rowSpan={g.items.length}>
@@ -1434,7 +1466,7 @@ export default function TrackerSection({
                     <td className="orders-item">{orderItemLabel(o)}</td>
                     <td className="orders-date">
                       {formatDate(o.ordered_at)}
-                      <OrderTags o={o} />
+                      <OrderTags o={o} saleSize={saleSizeOf(o)} />
                     </td>
                     <td>
                       {state === 'unpaid' && <span className="pill pill-out">Unpaid</span>}
@@ -1504,7 +1536,7 @@ export default function TrackerSection({
                           ...(isAdmin && o.source === 'manual' && o.payment_status === 'pending' && o.customer_email
                             ? [{ label: 'Resend payment link', onClick: () => resendLink(o) }]
                             : []),
-                          ...((state === 'unpaid' || state === 'owing') && o.source === 'manual' && o.payment_status === 'pending' && o.stock_items?.wix_product_url
+                          ...((state === 'unpaid' || state === 'owing') && o.source === 'manual' && o.payment_status === 'pending' && hasShopPage(o)
                             ? [{ label: 'Copy payment message', icon: <CopyIcon />, onClick: () => copyMessage(o) }]
                             : []),
                           ...(isAdmin ? [{ label: 'Remove', onClick: () => removeOrder(o.id) }] : []),

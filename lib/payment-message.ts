@@ -5,30 +5,58 @@ import { money } from '@/lib/types';
 // loaded; it only ever goes to the clipboard, never through a server.
 // (A "Share…" option existed briefly; its "Link shared" records still
 // display via linkSharedLabel.)
+//
+// One message covers every unpaid item of a /sell sale (orders.sale_id).
+// A single item keeps the original one-line wording.
 
-export interface PaymentMessageInput {
-  customerName: string;
+export interface PaymentMessageItem {
   productName: string;
   size: string;
   quantity: number;
   unitPrice: number;
-  paymentUrl: string;
-  email: string | null;
+  /** null when the item has no shop page; it is still listed. */
+  paymentUrl: string | null;
   /** Already handed over (an unpaid order with distributed_at set). */
   collected: boolean;
 }
 
+export interface PaymentMessageInput {
+  customerName: string;
+  email: string | null;
+  items: PaymentMessageItem[];
+}
+
 export function buildPaymentMessage(m: PaymentMessageInput): string {
   const first = m.customerName.trim().split(/\s+/)[0] || 'there';
-  const item = m.quantity > 1 ? `${m.quantity} x ${m.productName}` : m.productName;
-  const what = m.collected
-    ? `the ${item} (${m.size}) you've already collected`
-    : `the ${item} (${m.size})`;
-  const amount = money(m.quantity * m.unitPrice);
-  const emailLine = m.email
-    ? ` Please use ${m.email} at checkout so we can match your payment.`
-    : '';
-  return `Hi ${first}, here's the link to pay for ${what}, ${amount}: ${m.paymentUrl}.${emailLine} Thanks, Macedon Cricket Club`;
+  const total = money(m.items.reduce((sum, i) => sum + i.quantity * i.unitPrice, 0));
+
+  if (m.items.length === 1 && m.items[0].paymentUrl) {
+    const i = m.items[0];
+    const item = i.quantity > 1 ? `${i.quantity} x ${i.productName}` : i.productName;
+    const what = i.collected
+      ? `the ${item} (${i.size}) you've already collected`
+      : `the ${item} (${i.size})`;
+    const emailLine = m.email
+      ? ` Please use ${m.email} at checkout so we can match your payment.`
+      : '';
+    return `Hi ${first}, here's the link to pay for ${what}, ${total}: ${i.paymentUrl}.${emailLine} Thanks, Macedon Cricket Club`;
+  }
+
+  const lines = m.items.map((i) => {
+    const qty = i.quantity > 1 ? `${i.quantity} x ` : '';
+    const collected = i.collected ? ', already collected' : '';
+    const link = i.paymentUrl ?? "no online link, we'll sort this one with you";
+    return `- ${qty}${i.productName} (${i.size}), ${money(i.quantity * i.unitPrice)}${collected}: ${link}`;
+  });
+  const checkout = m.email
+    ? `Add each item to your cart, then check out once using ${m.email}.`
+    : 'Add each item to your cart, then check out once.';
+  return [
+    `Hi ${first}, here are the links to pay for your order, ${total} in total:`,
+    ...lines,
+    checkout,
+    'Thanks, Macedon Cricket Club',
+  ].join('\n');
 }
 
 /** Must be called synchronously from the tap handler (before any await),

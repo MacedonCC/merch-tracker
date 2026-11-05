@@ -9,7 +9,11 @@ import {
   paymentLinkHtml,
   paymentLinkSubject,
   paymentLinkText,
+  saleEmailHtml,
+  saleEmailSubject,
+  saleEmailText,
   type PaymentLinkEmailInput,
+  type SaleEmailInput,
 } from '@/lib/payment-link-email';
 
 // Emails a parent the shop link for an order recorded through /sell.
@@ -24,6 +28,11 @@ import {
 // the caller is on the members list), not the CRON_SECRET pattern: this
 // is triggered by a signed-in coach, not a cron job. It is NOT
 // admin-only — any committee member can sell.
+//
+// One email per SALE, not per row: when the order belongs to a /sell
+// checkout of several items (orders.sale_id), every unpaid manual row
+// in that sale goes into the same email, and the outcome is recorded on
+// each of them. A row with no sale_id is a sale of one.
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 30;
@@ -43,6 +52,35 @@ function ok(result: Result) {
   return NextResponse.json(result);
 }
 
+const ORDER_COLUMNS =
+  'id, sale_id, customer_name, customer_email, quantity, unit_price, distributed_at, payment_status, source, ordered_at, stock_items!stock_item_id(name, size, wix_product_url)';
+
+interface StockItem {
+  name: string;
+  size: string;
+  wix_product_url: string | null;
+}
+
+interface OrderWithItem {
+  id: string;
+  sale_id: string | null;
+  customer_name: string;
+  customer_email: string | null;
+  quantity: number;
+  unit_price: number | string;
+  distributed_at: string | null;
+  payment_status: string;
+  source: string;
+  stock_items?: unknown;
+}
+
+// Supabase types an embedded row as an array when it cannot prove the
+// relationship is to-one, so accept either shape.
+function itemOf(row: OrderWithItem): StockItem | undefined {
+  const raw = row.stock_items;
+  return (Array.isArray(raw) ? raw[0] : raw) as StockItem | undefined;
+}
+
 export async function POST(req: NextRequest) {
   const body = (await req.json().catch(() => ({}))) as Body;
   const { orderId, resend } = body;
@@ -59,31 +97,49 @@ export async function POST(req: NextRequest) {
   // the product, size and price in the email must be what was actually
   // recorded, not whatever a client claimed.
   const supabase = createServerSupabase();
-  const { data: order, error } = await supabase
+  const { data, error } = await supabase
     .from('orders')
-    .select('id, customer_name, customer_email, quantity, unit_price, distributed_at, payment_status, source, stock_items!stock_item_id(name, size, wix_product_url)')
+    .select(ORDER_COLUMNS)
     .eq('id', orderId)
     .maybeSingle();
+  const order = data as OrderWithItem | null;
 
   if (error || !order) {
     console.error('send-payment-link: order lookup failed', { orderId, error });
     return ok({ sent: false, reason: 'Could not find that order.' });
   }
 
-  // Supabase types an embedded row as an array when it cannot prove the
-  // relationship is to-one, so accept either shape.
-  const rawItem = (order as { stock_items?: unknown }).stock_items;
-  const item = (Array.isArray(rawItem) ? rawItem[0] : rawItem) as
-    | { name: string; size: string; wix_product_url: string | null }
-    | undefined;
-
   if (resend && (order.payment_status !== 'pending' || order.source !== 'manual')) {
     return ok({ sent: false, reason: 'Only unpaid orders from /sell can be resent.' });
   }
+
+  // The rest of its sale, if it has one: unpaid /sell rows only, so a
+  // resend never asks for money already taken. A failed read falls back
+  // to this one row rather than not sending at all.
+  let rows: OrderWithItem[] = [order];
+  if (order.sale_id) {
+    const { data: sale, error: saleError } = await supabase
+      .from('orders')
+      .select(ORDER_COLUMNS)
+      .eq('sale_id', order.sale_id)
+      .eq('source', 'manual')
+      .eq('payment_status', 'pending')
+      .order('ordered_at')
+      .order('id');
+    if (saleError) {
+      console.error('send-payment-link: sale lookup failed', { orderId, saleError });
+    } else if (sale && sale.length > 0) {
+      rows = sale as unknown as OrderWithItem[];
+      if (!rows.some((r) => r.id === order.id)) rows = [order, ...rows];
+    }
+  }
+  const ids = rows.map((r) => r.id);
+  const items = rows.map(itemOf);
+
   // Best-effort: remembering the outcome must never turn a sent email
   // into a reported failure.
   const record = async (patch: { email_sent_at?: string; email_error: string | null }) => {
-    const { error: recordError } = await supabase.from('orders').update(patch).eq('id', orderId);
+    const { error: recordError } = await supabase.from('orders').update(patch).in('id', ids);
     if (recordError) console.error('send-payment-link: could not record result', { orderId, recordError });
   };
 
@@ -91,9 +147,12 @@ export async function POST(req: NextRequest) {
     await record({ email_error: 'No email address on the order.' });
     return ok({ sent: false, reason: 'No email address on the order.' });
   }
-  if (!item?.wix_product_url) {
-    await record({ email_error: 'This item has no shop page.' });
-    return ok({ sent: false, reason: 'This item has no shop page.' });
+  // An item without a shop page is still listed in a sale's email; only
+  // a sale where nothing has one has no link to send.
+  if (!items.some((i) => i?.wix_product_url)) {
+    const reason = rows.length > 1 ? 'No item in this sale has a shop page.' : 'This item has no shop page.';
+    await record({ email_error: reason });
+    return ok({ sent: false, reason });
   }
   // Checked after the order is found, so even this is recorded on it:
   // every outcome of a send leaves "Link emailed" or "Link not sent" on
@@ -115,20 +174,41 @@ export async function POST(req: NextRequest) {
     logo = null;
   }
 
-  const input: PaymentLinkEmailInput = {
-    customerName: order.customer_name,
-    productName: item.name,
-    size: item.size,
-    quantity: order.quantity,
-    unitPrice: Number(order.unit_price) || 0,
-    paymentUrl: item.wix_product_url,
-    // Whether they walked away with it is read from the order itself,
-    // not posted by the browser. distributed_at is set only by the
-    // "taking it now" path, so its presence on a still-unpaid order is
-    // exactly the condition the copy needs to describe.
-    takenNow: !!order.distributed_at,
-    hasLogo: !!logo,
-  };
+  // Whether they walked away with it is read from the order itself,
+  // not posted by the browser. distributed_at is set only by the
+  // "taking it now" path, so its presence on a still-unpaid order is
+  // exactly the condition the copy needs to describe.
+  let mail: { subject: string; text: string; html: string };
+  if (rows.length === 1) {
+    const row = rows[0];
+    const item = items[0] as StockItem;
+    const input: PaymentLinkEmailInput = {
+      customerName: row.customer_name,
+      productName: item.name,
+      size: item.size,
+      quantity: row.quantity,
+      unitPrice: Number(row.unit_price) || 0,
+      paymentUrl: item.wix_product_url as string,
+      takenNow: !!row.distributed_at,
+      hasLogo: !!logo,
+    };
+    mail = { subject: paymentLinkSubject(input), text: paymentLinkText(input), html: paymentLinkHtml(input) };
+  } else {
+    const input: SaleEmailInput = {
+      customerName: order.customer_name,
+      email: order.customer_email,
+      items: rows.map((r, n) => ({
+        productName: items[n]?.name ?? 'Item',
+        size: items[n]?.size ?? '',
+        quantity: r.quantity,
+        unitPrice: Number(r.unit_price) || 0,
+        paymentUrl: items[n]?.wix_product_url ?? null,
+        takenNow: !!r.distributed_at,
+      })),
+      hasLogo: !!logo,
+    };
+    mail = { subject: saleEmailSubject(input), text: saleEmailText(input), html: saleEmailHtml(input) };
+  }
 
   try {
     const transport = nodemailer.createTransport({
@@ -142,9 +222,9 @@ export async function POST(req: NextRequest) {
     await transport.sendMail({
       from: { name: 'Macedon Cricket Club', address: process.env.GMAIL_USER },
       to: order.customer_email,
-      subject: paymentLinkSubject(input),
-      text: paymentLinkText(input),
-      html: paymentLinkHtml(input),
+      subject: mail.subject,
+      text: mail.text,
+      html: mail.html,
       attachments: logo
         ? [
             {

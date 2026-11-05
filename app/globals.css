@@ -770,6 +770,33 @@ button.matrix-line:hover { background-color: var(--tint); }
 }
 .sell-suggest-item:active { border-color: var(--accent); }
 
+/* The items in the sale, at the top of the "who" step. Tapping the
+   name changes the size; the stepper's minus becomes a remove at 1, so
+   a line can never sit at quantity 0. Thumb-sized for one-handed use. */
+.sell-lines { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.sell-line {
+  display: flex; align-items: center; gap: 8px; padding: 6px 6px 6px 0;
+  background: var(--paper); border: 1px solid var(--line-strong); border-radius: var(--radius);
+}
+.sell-line[data-short='true'] { border-color: var(--warn); border-style: dashed; }
+.sell-line-main {
+  flex: 1 1 auto; min-width: 0; min-height: 52px; padding: 6px 12px;
+  display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 2px;
+  background: none; border: none; text-align: left; font: inherit; color: var(--ink); cursor: pointer;
+}
+.sell-line-name { font-weight: 600; line-height: 1.25; }
+.sell-line-meta { font-size: 0.9rem; color: var(--ink-soft); }
+.sell-line-short { color: var(--warn); font-weight: 600; }
+.sell-qty { flex: 0 0 auto; display: flex; align-items: center; gap: 4px; }
+.sell-qty-btn {
+  width: 44px; height: 44px; font: inherit; font-size: 1.3rem; line-height: 1; cursor: pointer;
+  background: var(--row-alt); color: var(--ink);
+  border: 1px solid var(--line); border-radius: var(--radius);
+}
+.sell-qty-btn:active { border-color: var(--accent); }
+.sell-qty-n { min-width: 1.6em; text-align: center; font-weight: 700; font-size: 1.1rem; }
+.sell-add { text-align: left; margin-top: -4px; }
+
 /* Juniors | Seniors on the "who" step: two thumb-sized halves. */
 .sell-group { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .sell-group-btn {
@@ -834,6 +861,19 @@ button.matrix-line:hover { background-color: var(--tint); }
   background: var(--paper); border: 1px solid var(--warn);
   font-size: 0.95rem; text-align: left; color: var(--ink);
 }
+
+/* Per-item state on a multi-item confirmation. */
+.sell-done-items {
+  list-style: none; margin: 4px 0 0; padding: 0; text-align: left;
+  display: flex; flex-direction: column; gap: 6px;
+}
+.sell-done-items li {
+  display: flex; justify-content: space-between; align-items: baseline; gap: 10px;
+  padding: 8px 12px; background: var(--paper); border-radius: var(--radius);
+  font-size: 0.95rem;
+}
+.sell-done-item-state { flex: 0 0 auto; font-size: 0.8rem; font-weight: 700; color: var(--ink-soft); }
+.sell-done-item-state[data-owed='true'] { color: var(--warn); }
 
 .sell-link { display: flex; flex-direction: column; gap: 10px; }
 .sell-link-url {

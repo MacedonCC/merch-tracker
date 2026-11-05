@@ -543,6 +543,20 @@ Two things about it are load-bearing:
   stock alone. The question is skipped entirely on a back-order, where
   there is nothing to take. Taking it now is what creates the
   unpaid-but-handed-over combination described under Route structure.
+- **A sale can hold several items** (5 Nov 2026). Customer, email,
+  group and payment are entered once; each item is still **one
+  `orders` row**, all written in one INSERT and linked by
+  `orders.sale_id` (migration `20261105000002`), so stock, handovers,
+  the matcher and wix-sync see nothing new. Only the payment email and
+  message read `sale_id`. The same stock line never appears twice in a
+  sale (a second pick adds to its quantity). A line whose quantity is
+  more than `available` is left whole and owed, **never split** into a
+  handed-over part and an owed part: the matcher pairs a Wix line with
+  a row of the same quantity, so a split row would never auto-merge.
+  A multi-item Wix order already imports as one row per line, and the
+  matcher works line by line, so each line merges into its own /sell
+  row; `(wix_order_id, stock_item_id)` is what is unique, so several
+  rows may share one Wix order id. There is no sale-based tie-break.
 
 `stock_items.image_url` / `wix_product_url` (migration
 `20260920000002_sell_flow.sql`) feed the product grid and the "send
@@ -649,7 +663,12 @@ by a signed-in coach — and it is deliberately not admin-only.
 **Payment message by SMS / WhatsApp** (`lib/payment-message.ts`, 23 Oct
 2026), for when email lands in junk: "Copy payment message" on
 the Orders row ⋯ menu for pending manual orders with a
-shop page, and on the /sell done screen. Browser-only; any committee
+shop page, and on the /sell done screen. Both it and "Resend payment
+link" cover **every unpaid /sell row in the same sale** in one message
+(`send-payment-link` gathers the sale from `sale_id` itself and records
+the result on each row); paid rows in the sale are left out. A single
+item keeps the original wording, and the single-item email is
+byte-identical to before. Browser-only; any committee
 member. Records `orders.link_shared_at` / `link_shared_via`
 (migration `20261023000001`), shown as "Link copied 23/10". A
 short-lived "Share…" option was removed; its `shared` records still
