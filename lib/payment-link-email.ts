@@ -1,4 +1,5 @@
 import { money } from '@/lib/types';
+import { sizeStep } from '@/lib/payment-message';
 
 // Builds the "here's your order, please pay" email sent from the /sell
 // flow when a coach chooses "Send payment link" and the parent gave an
@@ -121,6 +122,8 @@ export function paymentLinkText(input: PaymentLinkEmailInput): string {
     '',
     'Pay online here:',
     input.paymentUrl,
+    '',
+    `On the page, ${sizeStep(input.size)}.`,
     '',
     ...(input.takenNow
       ? [
@@ -260,8 +263,11 @@ ${detailRow('Qty', String(input.quantity))}
                 </tr>
               </table>
 
+              <p style="margin:22px 0 0 0;font-family:Arial,Helvetica,sans-serif;font-size:15px;
+                 line-height:22px;color:${INK};">On the page, ${escapeHtml(sizeStep(input.size))}.</p>
+
               <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
-                     style="margin:26px 0 22px 0;">
+                     style="margin:18px 0 22px 0;">
                 <tr>
                   <td align="center" style="font-family:Arial,Helvetica,sans-serif;">
 <!--[if mso]>
@@ -354,7 +360,9 @@ export function saleEmailText(input: SaleEmailInput): string {
     ...input.items.flatMap((i) => [
       `  ${i.quantity} x ${i.productName} (${i.size}) - ${money(i.unitPrice * i.quantity)}` +
         (i.takenNow ? ' - with you already' : ''),
-      `    ${i.paymentUrl ?? "No online link for this one - we'll sort it with you."}`,
+      i.paymentUrl
+        ? `    ${i.productName}: ${sizeStep(i.size)}. ${i.paymentUrl}`
+        : "    No online link for this one - we'll sort it with you.",
     ]),
     '',
     `  Total:  ${saleTotal(input)}`,
@@ -388,7 +396,7 @@ export function saleEmailHtml(input: SaleEmailInput): string {
       ? `<span style="font-size:12px;color:${MUTED};font-weight:normal;"> &middot; with you already</span>`
       : '';
     const link = url
-      ? `<a href="${url}" style="color:${RED};font-weight:bold;text-decoration:underline;">Add to cart &rarr;</a>`
+      ? `<a href="${url}" style="color:${RED};font-weight:bold;text-decoration:underline;">${escapeHtml(sizeStep(i.size).replace(/^s/, 'S'))} &rarr;</a>`
       : `<span style="color:${MUTED};">${NO_LINK_TEXT}</span>`;
     return `
                       <tr>

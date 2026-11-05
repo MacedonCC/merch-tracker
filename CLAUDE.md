@@ -667,8 +667,12 @@ shop page, and on the /sell done screen. Both it and "Resend payment
 link" cover **every unpaid /sell row in the same sale** in one message
 (`send-payment-link` gathers the sale from `sale_id` itself and records
 the result on each row); paid rows in the sale are left out. A single
-item keeps the original wording, and the single-item email is
-byte-identical to before. Browser-only; any committee
+item keeps the one-line wording. Every link, in the email and the
+message, goes through `sizedProductUrl()` (`lib/payment-message.ts`):
+`?variantId=<wix_variant_id>` preselects the size on our Wix product
+page (checked in a rendered page, 5 Nov 2026); a line with no variant
+id keeps the plain page. Each item also says "select size M, then Add
+to cart" (`sizeStep()`), even when preselected, so it can be checked. Browser-only; any committee
 member. Records `orders.link_shared_at` / `link_shared_via`
 (migration `20261023000001`), shown as "Link copied 23/10". A
 short-lived "Share…" option was removed; its `shared` records still

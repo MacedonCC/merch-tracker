@@ -22,6 +22,7 @@ interface MediaRow {
   id: string;
   image_url: string | null;
   wix_product_url: string | null;
+  wix_variant_id: string | null;
   retired_at: string | null;
 }
 
@@ -37,7 +38,7 @@ export default async function SellPage() {
   // come from stock_items and are merged in by id.
   const [{ data: overview }, { data: media }, { data: names }] = await Promise.all([
     supabase.from('stock_overview').select('id, name, size, price, on_hand, committed, available'),
-    supabase.from('stock_items').select('id, image_url, wix_product_url, retired_at'),
+    supabase.from('stock_items').select('id, image_url, wix_product_url, wix_variant_id, retired_at'),
     supabase.from('orders').select('customer_name'),
   ]);
 
@@ -64,6 +65,7 @@ export default async function SellPage() {
       available: Number(row.available) || 0,
       image_url: mediaById.get(row.id)?.image_url ?? null,
       wix_product_url: mediaById.get(row.id)?.wix_product_url ?? null,
+      wix_variant_id: mediaById.get(row.id)?.wix_variant_id ?? null,
     }));
 
   // Distinct past customers, for the step 3 type-ahead. Deduped

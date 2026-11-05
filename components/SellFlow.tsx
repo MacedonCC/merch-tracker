@@ -3,7 +3,7 @@
 import { useMemo, useState } from 'react';
 import { createClient } from '@/lib/supabase-client';
 import { money, sizeRank, tidyName } from '@/lib/types';
-import { buildPaymentMessage, copyText } from '@/lib/payment-message';
+import { buildPaymentMessage, copyText, sizedProductUrl } from '@/lib/payment-message';
 import CopyIcon from '@/components/CopyIcon';
 
 export interface SellItem {
@@ -14,6 +14,8 @@ export interface SellItem {
   available: number;
   image_url: string | null;
   wix_product_url: string | null;
+  /** Lets the link open the shop page with this size chosen. */
+  wix_variant_id: string | null;
 }
 
 type Step = 'product' | 'size' | 'who' | 'pay' | 'timing' | 'done';
@@ -329,7 +331,9 @@ export default function SellFlow({
       size: l.item.size,
       quantity: l.quantity,
       price: l.item.price,
-      paymentUrl: l.item.wix_product_url,
+      paymentUrl: l.item.wix_product_url
+        ? sizedProductUrl(l.item.wix_product_url, l.item.wix_variant_id)
+        : null,
       handedOver: handsOver(l),
       owed: isShort(l),
     }));

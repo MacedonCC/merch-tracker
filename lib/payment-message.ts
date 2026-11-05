@@ -9,6 +9,27 @@ import { money } from '@/lib/types';
 // One message covers every unpaid item of a /sell sale (orders.sale_id).
 // A single item keeps the original one-line wording.
 
+// The shop page with the size already chosen. Checked against our store
+// on 5 Nov 2026: ?variantId=<Wix variant id> preselects that size in the
+// product page's dropdown. A line with no variant id keeps the plain
+// page, where the customer picks the size themselves.
+export function sizedProductUrl(url: string, variantId: string | null | undefined): string {
+  if (!variantId) return url;
+  try {
+    const u = new URL(url);
+    u.searchParams.set('variantId', variantId);
+    return u.toString();
+  } catch {
+    return url;
+  }
+}
+
+// What to do on the product page. Stated even when the link preselects
+// the size, so the customer can check it before adding to the cart.
+export function sizeStep(size: string): string {
+  return /^one size$/i.test(size.trim()) ? 'Add to cart' : `select size ${size}, then Add to cart`;
+}
+
 export interface PaymentMessageItem {
   productName: string;
   size: string;
@@ -39,14 +60,17 @@ export function buildPaymentMessage(m: PaymentMessageInput): string {
     const emailLine = m.email
       ? ` Please use ${m.email} at checkout so we can match your payment.`
       : '';
-    return `Hi ${first}, here's the link to pay for ${what}, ${total}: ${i.paymentUrl}.${emailLine} Thanks, Macedon Cricket Club`;
+    const step = sizeStep(i.size);
+    return `Hi ${first}, here's the link to pay for ${what}, ${total}: ${i.paymentUrl}. On the page, ${step}.${emailLine} Thanks, Macedon Cricket Club`;
   }
 
   const lines = m.items.map((i) => {
     const qty = i.quantity > 1 ? `${i.quantity} x ` : '';
     const collected = i.collected ? ', already collected' : '';
-    const link = i.paymentUrl ?? "no online link, we'll sort this one with you";
-    return `- ${qty}${i.productName} (${i.size}), ${money(i.quantity * i.unitPrice)}${collected}: ${link}`;
+    const how = i.paymentUrl
+      ? `${sizeStep(i.size)}. ${i.paymentUrl}`
+      : "no online link, we'll sort this one with you";
+    return `- ${qty}${i.productName}: ${how} (${money(i.quantity * i.unitPrice)}${collected})`;
   });
   const checkout = m.email
     ? `Add each item to your cart, then check out once using ${m.email}.`

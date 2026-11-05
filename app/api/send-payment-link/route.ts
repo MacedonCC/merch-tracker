@@ -15,6 +15,7 @@ import {
   type PaymentLinkEmailInput,
   type SaleEmailInput,
 } from '@/lib/payment-link-email';
+import { sizedProductUrl } from '@/lib/payment-message';
 
 // Emails a parent the shop link for an order recorded through /sell.
 //
@@ -53,12 +54,13 @@ function ok(result: Result) {
 }
 
 const ORDER_COLUMNS =
-  'id, sale_id, customer_name, customer_email, quantity, unit_price, distributed_at, payment_status, source, ordered_at, stock_items!stock_item_id(name, size, wix_product_url)';
+  'id, sale_id, customer_name, customer_email, quantity, unit_price, distributed_at, payment_status, source, ordered_at, stock_items!stock_item_id(name, size, wix_product_url, wix_variant_id)';
 
 interface StockItem {
   name: string;
   size: string;
   wix_product_url: string | null;
+  wix_variant_id: string | null;
 }
 
 interface OrderWithItem {
@@ -188,7 +190,7 @@ export async function POST(req: NextRequest) {
       size: item.size,
       quantity: row.quantity,
       unitPrice: Number(row.unit_price) || 0,
-      paymentUrl: item.wix_product_url as string,
+      paymentUrl: sizedProductUrl(item.wix_product_url as string, item.wix_variant_id),
       takenNow: !!row.distributed_at,
       hasLogo: !!logo,
     };
@@ -202,7 +204,9 @@ export async function POST(req: NextRequest) {
         size: items[n]?.size ?? '',
         quantity: r.quantity,
         unitPrice: Number(r.unit_price) || 0,
-        paymentUrl: items[n]?.wix_product_url ?? null,
+        paymentUrl: items[n]?.wix_product_url
+          ? sizedProductUrl(items[n]?.wix_product_url as string, items[n]?.wix_variant_id)
+          : null,
         takenNow: !!r.distributed_at,
       })),
       hasLogo: !!logo,

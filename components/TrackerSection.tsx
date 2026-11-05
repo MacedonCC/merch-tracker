@@ -4,7 +4,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode }
 import { createClient } from '@/lib/supabase-client';
 import { projectRestock } from '@/lib/restock';
 import type { MemberPermissions } from '@/lib/member';
-import { buildPaymentMessage, copyText, linkSharedLabel } from '@/lib/payment-message';
+import { buildPaymentMessage, copyText, linkSharedLabel, sizedProductUrl } from '@/lib/payment-message';
 import CopyIcon from '@/components/CopyIcon';
 
 // The nearest ancestor that would clip an overflowing child (the
@@ -139,7 +139,7 @@ interface OrderRow {
   // Shared by the rows of one /sell checkout (migration 20261105000002).
   // Only the payment email and message read it.
   sale_id?: string | null;
-  stock_items?: { name: string; size: string; wix_product_url?: string | null } | null;
+  stock_items?: { name: string; size: string; wix_product_url?: string | null; wix_variant_id?: string | null } | null;
   // Only present when a different size was handed over than was
   // ordered — see "Hand over a different size" below.
   given_item?: { name: string; size: string } | null;
@@ -473,7 +473,7 @@ export default function TrackerSection({
         // given_stock_item_id), so both embeds need an explicit hint —
         // PostgREST refuses an ambiguous embed even when only one is
         // requested.
-        .select('*, stock_items!stock_item_id(name, size, wix_product_url), given_item:stock_items!given_stock_item_id(name, size)')
+        .select('*, stock_items!stock_item_id(name, size, wix_product_url, wix_variant_id), given_item:stock_items!given_stock_item_id(name, size)')
         .order('ordered_at', { ascending: false }),
       supabase.from('stock_items').select('id, wix_listed_at, retired_at'),
     ]);
@@ -878,7 +878,9 @@ export default function TrackerSection({
         size: x.stock_items?.size ?? '',
         quantity: x.quantity,
         unitPrice: Number(x.unit_price) || 0,
-        paymentUrl: x.stock_items?.wix_product_url ?? null,
+        paymentUrl: x.stock_items?.wix_product_url
+          ? sizedProductUrl(x.stock_items.wix_product_url, x.stock_items.wix_variant_id)
+          : null,
         collected: !!x.distributed_at,
       })),
     });
