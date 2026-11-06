@@ -514,6 +514,25 @@ constant number of Supabase calls regardless of import size — read existing
 keys, read stock list, one bulk upsert — with matching/deduping done in
 memory; keep that shape when touching it.
 
+### Handed over without a stock change
+
+"Mark handed over (no stock change)" (Orders row ⋯ menu, admin only)
+is for gear that left the cupboard before the stock count it came out
+of was taken. It calls `mark_handed_over_no_stock()` (migration
+`20261106000003`). That function checks the caller is an admin in the
+database, requires a note, sets the handover and logs a `change 0`
+`stock_movements` row. This is the same shape as the Sep 2026 HIST
+cleanup, whose rows have `handed_over_by = 'HIST'`.
+`orders.handover_no_stock` marks such a handover so that undo and
+delete restore nothing. Nobody can write it directly: `check_order_update()`
+derives it on every update, true only while that function's
+transaction-local `app.no_stock_handover` flag is set. A helper sending `handover_no_stock = true` with an ordinary
+handover still has stock deducted. Removing a not-handed-over Wix row
+does not stop wix-sync re-importing it; mark it handed over instead,
+so its `(wix_order_id, stock_item_id)` stays held. `GET
+/api/wix-sync?dryRun=1` (CRON_SECRET) lists what an import would insert
+and writes nothing.
+
 ### Non-stock lines (fees)
 
 `stock_items.non_stock` (migration `20261106000001`, admin-only, and a

@@ -120,6 +120,8 @@ interface OrderRow {
   distributed_at: string | null;
   handed_over_by: string | null;
   handover_note: string | null;
+  // Handed over without a stock deduction (migration 20261106000003).
+  handover_no_stock?: boolean;
   source: 'manual' | 'wix';
   payment_method?: 'cash' | 'online' | 'unknown';
   email_sent_at?: string | null;
@@ -442,7 +444,7 @@ export default function TrackerSection({
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState<'item' | 'order' | 'edit' | 'handover' | 'substitute' | null>(null);
   const [editing, setEditing] = useState<StockRow | null>(null);
-  const [handoverForm, setHandoverForm] = useState<{ ids: string[]; date: string; initials: string; note: string } | null>(null);
+  const [handoverForm, setHandoverForm] = useState<{ ids: string[]; date: string; initials: string; note: string; noStock?: boolean } | null>(null);
   const [substituteForm, setSubstituteForm] = useState<{
     id: string; date: string; initials: string; note: string; options: StockRow[]; givenId: string;
   } | null>(null);
@@ -735,7 +737,11 @@ export default function TrackerSection({
   // initials were last used this session; for "Edit handover" on an
   // already-done order it pre-fills from that order's own values so a
   // mistake can be corrected without an undo/redo round trip.
-  function openHandoverModal(ids: string[], existing?: OrderRow) {
+  // noStock: "Mark handed over (no stock change)" - admin only, for an
+  // order whose garment left before the stock count it came out of was
+  // taken. Goes through mark_handed_over_no_stock(), which checks admin,
+  // requires the note and logs a change-0 stock movement.
+  function openHandoverModal(ids: string[], existing?: OrderRow, noStock = false) {
     const today = new Date().toISOString().slice(0, 10);
     let remembered = '';
     try { remembered = sessionStorage.getItem('handoverInitials') ?? ''; } catch {}
@@ -745,6 +751,7 @@ export default function TrackerSection({
       date: existing?.distributed_at ? existing.distributed_at.slice(0, 10) : today,
       initials: existing?.handed_over_by ?? remembered,
       note: existing?.handover_note ?? '',
+      noStock,
     });
     setModal('handover');
   }
@@ -763,8 +770,26 @@ export default function TrackerSection({
     const note = String(f.get('note') ?? '').trim() || null;
     if (!date) return flash('Date is required.');
     if (!initials) return flash('Initials are required.');
+    if (handoverForm.noStock && !note) return flash('A note is required.');
 
     try { sessionStorage.setItem('handoverInitials', initials); } catch {}
+
+    if (handoverForm.noStock) {
+      for (const id of handoverForm.ids) {
+        const { error } = await supabase.rpc('mark_handed_over_no_stock', {
+          p_order_id: id,
+          p_note: note,
+          p_handed_over_by: initials,
+          p_handed_over_at: new Date(`${date}T12:00:00`).toISOString(),
+        });
+        if (error) return flash(error.message);
+      }
+      setModal(null);
+      setHandoverForm(null);
+      flash('Marked handed over. Stock unchanged.');
+      load();
+      return;
+    }
 
     const { error } = await supabase
       .from('orders')
@@ -1453,6 +1478,7 @@ export default function TrackerSection({
                             { label: 'Hand over', onClick: () => openHandoverModal([i.id]) },
                             ...groupActions(i),
                             ...(isAdmin ? [{ label: 'Hand over a different size', onClick: () => openSubstituteModal(i) }] : []),
+                            ...(isAdmin ? [{ label: 'Mark handed over (no stock change)', onClick: () => openHandoverModal([i.id], undefined, true) }] : []),
                             ...(isAdmin ? [{ label: 'Remove', onClick: () => removeOrder(i.id) }] : []),
                           ]}
                         />
@@ -1541,6 +1567,11 @@ export default function TrackerSection({
                               “{o.handover_note}”
                             </div>
                           )}
+                          {o.handover_no_stock && (
+                            <div style={{ fontSize: '0.75rem', color: 'var(--ink-faint)', marginTop: 2 }}>
+                              No stock change
+                            </div>
+                          )}
                         </>
                       )}
                     </td>
@@ -1568,6 +1599,9 @@ export default function TrackerSection({
                           ...groupActions(o),
                           ...(isAdmin && (state === 'ready' || state === 'waiting' || state === 'unpaid')
                             ? [{ label: 'Hand over a different size', onClick: () => openSubstituteModal(o) }]
+                            : []),
+                          ...(isAdmin && (state === 'ready' || state === 'waiting' || state === 'unpaid')
+                            ? [{ label: 'Mark handed over (no stock change)', onClick: () => openHandoverModal([o.id], undefined, true) }]
                             : []),
                           ...(isAdmin && state !== 'fee' && o.source === 'manual' && o.payment_status === 'pending' && o.customer_email
                             ? [{ label: 'Resend payment link', onClick: () => resendLink(o) }]
@@ -1636,7 +1670,18 @@ export default function TrackerSection({
       {modal === 'handover' && handoverForm && (
         <div className="overlay" onClick={(e) => e.target === e.currentTarget && setModal(null)}>
           <form className="modal" onSubmit={(e) => { e.preventDefault(); saveHandover(e.currentTarget); }}>
-            <h3>{handoverForm.ids.length > 1 ? `Hand over ${handoverForm.ids.length} items` : 'Hand over'}</h3>
+            <h3>
+              {handoverForm.noStock
+                ? 'Mark handed over (no stock change)'
+                : handoverForm.ids.length > 1 ? `Hand over ${handoverForm.ids.length} items` : 'Hand over'}
+            </h3>
+            {handoverForm.noStock && (
+              <p style={{ fontSize: '0.82rem', color: 'var(--ink-soft)', marginBottom: '1rem' }}>
+                For gear that left the cupboard before the stock count was taken. The order is
+                marked handed over and stock is not reduced. Undoing it later puts nothing back.
+                Logged with your note.
+              </p>
+            )}
             {owedOn(handoverForm.ids) > 0 && (
               <p className="sell-error" role="alert">
                 Not paid yet: {money(owedOn(handoverForm.ids))} still owed
@@ -1646,8 +1691,9 @@ export default function TrackerSection({
               <input name="date" type="date" defaultValue={handoverForm.date} autoFocus /></div>
             <div className="field"><label>Initials</label>
               <input name="initials" defaultValue={handoverForm.initials} placeholder="e.g. AB" required /></div>
-            <div className="field"><label>Comments (optional)</label>
-              <textarea name="note" rows={3} defaultValue={handoverForm.note}></textarea></div>
+            <div className="field"><label>{handoverForm.noStock ? 'Note (required)' : 'Comments (optional)'}</label>
+              <textarea name="note" rows={3} defaultValue={handoverForm.note} required={handoverForm.noStock}
+                placeholder={handoverForm.noStock ? 'e.g. Handed over before stock balanced' : undefined}></textarea></div>
             <div className="modal-actions">
               <button type="button" onClick={() => setModal(null)}>Cancel</button>
               <button type="submit" className="btn-solid">Confirm</button>

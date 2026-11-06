@@ -144,8 +144,22 @@ export interface PaymentLinkMerge {
   paidBy: string;
 }
 
+/** A line a real run would insert (dry run only). */
+export interface WouldImportLine {
+  wixOrderNumber: string | null;
+  orderedAt: string;
+  customerName: string;
+  item: string;
+  quantity: number;
+  wixFulfilled: boolean;
+  nonStock: boolean;
+}
+
 export interface SyncResult {
   ok: boolean;
+  /** dryRun: nothing was written; see wouldImport. */
+  dryRun?: boolean;
+  wouldImport?: WouldImportLine[];
   /** HTTP status a route should answer with. 200 on success. */
   status: number;
   error?: string;
@@ -215,7 +229,10 @@ function fulfilmentTimestamp(order: WixOrder): string {
   return order.fulfillments?.[0]?.dateCreated ?? order.createdDate ?? new Date().toISOString();
 }
 
-export async function runWixSync(opts: { limit?: number } = {}): Promise<SyncResult> {
+// opts.dryRun: read Wix and the tracker, write nothing (no merges, no
+// insert) and report every paid line a real run would insert. Used to
+// find old Wix lines the tracker lacks before a sync brings them in.
+export async function runWixSync(opts: { limit?: number; dryRun?: boolean } = {}): Promise<SyncResult> {
   if (!process.env.WIX_API_KEY || !process.env.WIX_SITE_ID) {
     return fail(400, 'Wix is not connected yet. Add WIX_API_KEY and WIX_SITE_ID.');
   }
@@ -426,6 +443,30 @@ export async function runWixSync(opts: { limit?: number } = {}): Promise<SyncRes
         handedOver: isFulfilled,
       });
     }
+  }
+
+  if (opts.dryRun) {
+    const label = new Map(rows.map((s) => [s.id, `${s.name} / ${s.size}`]));
+    const nonStockIds = new Set(rows.filter((s) => s.non_stock).map((s) => s.id));
+    const wouldImport: WouldImportLine[] = toInsert.map((r) => ({
+      wixOrderNumber: (r.wix_order_number as string | null) ?? null,
+      orderedAt: r.ordered_at as string,
+      customerName: r.customer_name as string,
+      item: label.get(r.stock_item_id as string) ?? String(r.stock_item_id),
+      quantity: r.quantity as number,
+      wixFulfilled: r.distributed_at !== null && !nonStockIds.has(r.stock_item_id as string),
+      nonStock: nonStockIds.has(r.stock_item_id as string),
+    }));
+    return {
+      ok: true, status: 200, dryRun: true, wouldImport,
+      totalFetched: wixOrders.length, imported: 0, nonStockImported: 0, nonStockBeforeCutoff,
+      fulfilled, awaitingHandover,
+      unmatched: Array.from(unmatched.values()),
+      noSizeRecorded: Array.from(noSizeRecorded.values()),
+      paymentLinkMatching: paymentLinkMatchEnabled() ? 'on' : 'off',
+      paymentLinkMerges: [], paymentLinkErrors: [],
+      message: `Dry run: nothing written. ${wouldImport.length} line(s) would be imported.`,
+    };
   }
 
   // ---- Payment-link matching, before the insert ----

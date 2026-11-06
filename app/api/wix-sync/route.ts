@@ -34,10 +34,17 @@ export async function GET(req: NextRequest) {
   }
 
   const limitParam = Number(req.nextUrl.searchParams.get('limit'));
-  const sync = await runWixSync({ limit: limitParam });
+  // ?dryRun=1: read-only. Reports what an import would insert, and
+  // neither imports nor pushes.
+  const dryRun = req.nextUrl.searchParams.get('dryRun') === '1';
+  const sync = await runWixSync({ limit: limitParam, dryRun });
 
   if (!sync.ok) {
     return NextResponse.json({ error: sync.error }, { status: sync.status });
+  }
+
+  if (dryRun) {
+    return NextResponse.json({ ...sync, ranAt: new Date().toISOString() });
   }
 
   // Push AFTER the import, for the reason at the top of this file.
