@@ -357,12 +357,14 @@ const CHIPS: { key: 'all' | Exclude<OrderState, 'fee'>; label: string }[] = [
 type OrderGroupName = 'juniors' | 'seniors';
 type GroupFilter = 'juniors' | 'seniors' | 'unassigned' | 'all' | 'fees';
 
+// U+00AD in 'Unassigned' is a soft hyphen: on a 320px phone "Unassigned" cannot fit a
+// fifth of the row, so it may break as "Un-/assigned" (see globals.css).
 const GROUP_FILTERS: { key: GroupFilter; label: string }[] = [
   { key: 'juniors', label: 'Juniors' },
   { key: 'seniors', label: 'Seniors' },
-  { key: 'unassigned', label: 'Unassigned' },
-  { key: 'all', label: 'All' },
   { key: 'fees', label: 'Fees' },
+  { key: 'unassigned', label: 'Un­assigned' },
+  { key: 'all', label: 'All' },
 ];
 
 const GROUP_FILTER_KEY = 'ordersGroupFilter';
