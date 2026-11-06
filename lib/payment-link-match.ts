@@ -57,6 +57,8 @@ export interface PaidWixLine {
 export interface StockLabel {
   name: string;
   size: string;
+  /** stock_items.non_stock (a fee). Such lines are never matched. */
+  nonStock?: boolean;
 }
 
 export type ConfirmReason =
@@ -110,7 +112,7 @@ function byOrderedAt<T extends { orderedAt: string }>(a: T, b: T): number {
 /**
  * Callers pass only open manual orders (source manual, pending, no
  * wix_order_id) and only paid Wix lines; this does not re-check status.
- * `stock` is only used for the near-miss product comparison (same name,
+ * `stock` is used for the near-miss product comparison (same name,
  * different size).
  */
 export function matchPaymentLinks(
@@ -120,9 +122,12 @@ export function matchPaymentLinks(
 ): MatchResult {
   const result: MatchResult = { autoMerge: [], needsConfirmation: [], nearMisses: [] };
   const claimed = new Set<string>();
-  const sortedManuals = [...manuals].sort(byOrderedAt);
+  // Non-stock lines (fees) are record-keeping only: neither side of a
+  // pair, not even as a near-miss.
+  const isNonStock = (id: string | null) => !!id && stock.get(id)?.nonStock === true;
+  const sortedManuals = manuals.filter((m) => !isNonStock(m.stockItemId)).sort(byOrderedAt);
 
-  for (const wix of [...wixLines].sort(byOrderedAt)) {
+  for (const wix of wixLines.filter((w) => !isNonStock(w.stockItemId)).sort(byOrderedAt)) {
     const earlier = sortedManuals.filter((m) => placedBefore(m, wix));
 
     const exact = earlier.filter(
@@ -233,9 +238,9 @@ export function toPaidWixLine(o: OrderRow): PaidWixLine {
 export function buildReport(
   manualRows: OrderRow[],
   wixRows: OrderRow[],
-  stockRows: { id: string; name: string; size: string }[],
+  stockRows: { id: string; name: string; size: string; non_stock?: boolean }[],
 ) {
-  const stock = new Map<string, StockLabel>(stockRows.map((s) => [s.id, { name: s.name, size: s.size }]));
+  const stock = new Map<string, StockLabel>(stockRows.map((s) => [s.id, { name: s.name, size: s.size, nonStock: s.non_stock }]));
 
   const manuals = manualRows.map(toManualCandidate);
   const wixLines = wixRows.map(toPaidWixLine);

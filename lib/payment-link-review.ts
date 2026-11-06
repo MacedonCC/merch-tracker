@@ -72,10 +72,10 @@ function blockedReason(m: ManualOrderCandidate, w: PaidWixLine): string | null {
 export function buildReviewList(
   manualRows: OrderRow[],
   wixRows: OrderRow[],
-  stockRows: { id: string; name: string; size: string }[],
+  stockRows: { id: string; name: string; size: string; non_stock?: boolean }[],
   dismissed: Set<string>,
 ): ReviewPair[] {
-  const stock = new Map<string, StockLabel>(stockRows.map((s) => [s.id, { name: s.name, size: s.size }]));
+  const stock = new Map<string, StockLabel>(stockRows.map((s) => [s.id, { name: s.name, size: s.size, nonStock: s.non_stock }]));
   const result = matchPaymentLinks(manualRows.map(toManualCandidate), wixRows.map(toPaidWixLine), stock);
 
   const item = (id: string | null) => {
@@ -118,7 +118,7 @@ export async function loadMatchInputs(db: SupabaseClient) {
       .eq('source', 'manual').eq('payment_status', 'pending').is('wix_order_id', null),
     db.from('orders').select(ORDER_COLUMNS)
       .eq('source', 'wix').eq('payment_status', 'paid').not('stock_item_id', 'is', null),
-    db.from('stock_items').select('id, name, size'),
+    db.from('stock_items').select('id, name, size, non_stock'),
     db.from('payment_match_dismissals').select('manual_order_id, wix_order_row_id'),
   ]);
   const error = manualRes.error ?? wixRes.error ?? stockRes.error ?? dismissRes.error;
@@ -127,7 +127,7 @@ export async function loadMatchInputs(db: SupabaseClient) {
   return {
     manualRows: (manualRes.data ?? []) as OrderRow[],
     wixRows: (wixRes.data ?? []) as OrderRow[],
-    stockRows: (stockRes.data ?? []) as { id: string; name: string; size: string }[],
+    stockRows: (stockRes.data ?? []) as { id: string; name: string; size: string; non_stock: boolean }[],
     dismissed: new Set(
       ((dismissRes.data ?? []) as { manual_order_id: string; wix_order_row_id: string }[])
         .map((d) => `${d.manual_order_id}::${d.wix_order_row_id}`),

@@ -65,6 +65,8 @@ export async function GET(req: NextRequest) {
     wixPush: push,
     totalFetched: sync.totalFetched,
     imported: sync.imported,
+    nonStockImported: sync.nonStockImported,
+    nonStockBeforeCutoff: sync.nonStockBeforeCutoff,
     fulfilled: sync.fulfilled,
     awaitingHandover: sync.awaitingHandover,
     unmatched: sync.unmatched,

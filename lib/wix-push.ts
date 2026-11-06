@@ -117,6 +117,7 @@ interface ItemRow {
   wix_product_id: string | null;
   wix_variant_id: string | null;
   retired_at: string | null;
+  non_stock: boolean;
 }
 
 interface InvItem {
@@ -179,7 +180,7 @@ export async function pushAvailableToWix(opts: {
   const supabase = createAdminSupabase();
   const [{ data: overview }, { data: items }] = await Promise.all([
     supabase.from('stock_overview').select('id, name, size, on_hand, committed, available'),
-    supabase.from('stock_items').select('id, wix_product_id, wix_variant_id, retired_at'),
+    supabase.from('stock_items').select('id, wix_product_id, wix_variant_id, retired_at, non_stock'),
   ]);
 
   const linkById = new Map(((items ?? []) as ItemRow[]).map((r) => [r.id, r]));
@@ -244,6 +245,10 @@ export async function pushAvailableToWix(opts: {
     // size of a sized product report as "has no variant id" on every
     // run - a standing complaint about something already decided.
     if (link.retired_at) continue;
+    // A non-stock line (a fee) is never pushed: Wix does not track it,
+    // and writing a quantity would turn tracking on and cap the shop at
+    // the tracker's 0.
+    if (link.non_stock) continue;
 
     if (onlyProduct && link.wix_product_id !== onlyProduct && row.name.toLowerCase() !== onlyProduct) {
       continue;

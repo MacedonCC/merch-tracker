@@ -76,6 +76,17 @@ import {
 
 export const DEFAULT_LIMIT = 500;
 
+// NON-STOCK LINES (stock_items.non_stock, e.g. the Junior Playing Senior
+// Cricket Fee) are imported for the record only. A paid line is
+// inserted already handed over (Done) and in the Juniors group, in the
+// same INSERT as the rest of the row, so no stock trigger fires - and
+// the triggers ignore non-stock lines anyway (migration
+// 20261106000001). They never go to the payment-link matcher. Orders
+// placed before NON_STOCK_FROM are skipped: the club only wants this
+// season's fees. The cut-off is midnight 1 Jul 2026 in Melbourne
+// (AEST, UTC+10) and applies to non-stock lines only.
+export const NON_STOCK_FROM = '2026-06-30T14:00:00.000Z';
+
 interface WixLineItem {
   catalogReference?: {
     catalogItemId?: string;
@@ -140,6 +151,10 @@ export interface SyncResult {
   error?: string;
   totalFetched: number;
   imported: number;
+  /** Of `imported`, rows on non-stock lines (fees), inserted as Done. */
+  nonStockImported: number;
+  /** Paid non-stock lines skipped for being placed before NON_STOCK_FROM. */
+  nonStockBeforeCutoff: number;
   fulfilled: number;
   awaitingHandover: number;
   unmatched: UnmatchedLine[];
@@ -154,7 +169,7 @@ export interface SyncResult {
 function fail(status: number, error: string): SyncResult {
   return {
     ok: false, status, error,
-    totalFetched: 0, imported: 0, fulfilled: 0, awaitingHandover: 0,
+    totalFetched: 0, imported: 0, nonStockImported: 0, nonStockBeforeCutoff: 0, fulfilled: 0, awaitingHandover: 0,
     unmatched: [], noSizeRecorded: [],
     paymentLinkMatching: paymentLinkMatchEnabled() ? 'on' : 'off',
     paymentLinkMerges: [], paymentLinkErrors: [],
@@ -234,11 +249,12 @@ export async function runWixSync(opts: { limit?: number } = {}): Promise<SyncRes
   // Load the stock list so we can match Wix products to our rows. One query.
   const { data: stock } = await supabase
     .from('stock_items')
-    .select('id, name, size, price, wix_product_id, wix_variant_id');
+    .select('id, name, size, price, wix_product_id, wix_variant_id, non_stock');
 
   type StockRow = {
     id: string; name: string; size: string; price: number;
     wix_product_id: string | null; wix_variant_id: string | null;
+    non_stock: boolean;
   };
   const rows = (stock ?? []) as StockRow[];
 
@@ -270,11 +286,15 @@ export async function runWixSync(opts: { limit?: number } = {}): Promise<SyncRes
   // ---- Build every row to insert in memory, no DB calls here ----
   const toInsert: Record<string, unknown>[] = [];
   // Parallel to toInsert: the same line as the payment-link matcher sees it.
-  const incoming: PaidWixLine[] = [];
+  // null for a non-stock line, which the matcher never sees.
+  const incoming: (PaidWixLine | null)[] = [];
   const unmatched = new Map<string, UnmatchedLine>();
   const noSizeRecorded = new Map<string, NoSizeLine>();
   let fulfilled = 0;
   let awaitingHandover = 0;
+  let nonStockImported = 0;
+  let nonStockBeforeCutoff = 0;
+  const cutoff = Date.parse(NON_STOCK_FROM);
 
   for (const order of wixOrders) {
     if (order.paymentStatus !== 'PAID') continue;
@@ -341,7 +361,36 @@ export async function runWixSync(opts: { limit?: number } = {}): Promise<SyncRes
 
       const lineKey = `${order.id}::${match.id}`;
       if (seen.has(lineKey)) continue;
+
+      const orderedAt = order.createdDate ?? new Date().toISOString();
+      if (match.non_stock && !(Date.parse(orderedAt) >= cutoff)) {
+        nonStockBeforeCutoff += 1;
+        continue;
+      }
       seen.add(lineKey); // guards against the same pair appearing twice in this batch
+
+      if (match.non_stock) {
+        // Record-keeping only: Done at import, Juniors, never matched.
+        nonStockImported += 1;
+        toInsert.push({
+          customer_name: customerName,
+          customer_email: order.buyerInfo?.email ?? null,
+          stock_item_id: match.id,
+          quantity: line.quantity ?? 1,
+          unit_price: Number(line.price?.amount ?? match.price ?? 0),
+          payment_status: 'paid',
+          payment_method: 'online',
+          source: 'wix',
+          wix_order_id: order.id,
+          wix_order_number: order.number ? String(order.number) : null,
+          ordered_at: orderedAt,
+          distributed_at: isFulfilled ? fulfilmentTimestamp(order) : orderedAt,
+          order_group: 'juniors',
+          notes: order.number ? `Wix order #${order.number}` : null,
+        });
+        incoming.push(null);
+        continue;
+      }
 
       const distributedAt = isFulfilled ? fulfilmentTimestamp(order) : null;
       if (isFulfilled) fulfilled += 1; else awaitingHandover += 1;
@@ -396,8 +445,9 @@ export async function runWixSync(opts: { limit?: number } = {}): Promise<SyncRes
     if (openError) {
       paymentLinkErrors.push(`Could not read open orders, so nothing was matched: ${openError.message}`);
     } else {
-      const labels = new Map(rows.map((s) => [s.id, { name: s.name, size: s.size }]));
-      const result = matchPaymentLinks(((open ?? []) as OrderRow[]).map(toManualCandidate), incoming, labels);
+      const labels = new Map(rows.map((s) => [s.id, { name: s.name, size: s.size, nonStock: s.non_stock }]));
+      const lines = incoming.filter((l): l is PaidWixLine => l !== null);
+      const result = matchPaymentLinks(((open ?? []) as OrderRow[]).map(toManualCandidate), lines, labels);
       const merged = new Set<PaidWixLine>();
 
       for (const { manual, wix } of result.autoMerge) {
@@ -423,7 +473,10 @@ export async function runWixSync(opts: { limit?: number } = {}): Promise<SyncRes
 
       // Auto-merges are never handed-over lines, so each came off awaitingHandover.
       awaitingHandover -= merged.size;
-      rowsToInsert = toInsert.filter((_, i) => !merged.has(incoming[i]));
+      rowsToInsert = toInsert.filter((_, i) => {
+        const l = incoming[i];
+        return l === null || !merged.has(l);
+      });
     }
   }
 
@@ -450,6 +503,8 @@ export async function runWixSync(opts: { limit?: number } = {}): Promise<SyncRes
     status: 200,
     totalFetched: wixOrders.length,
     imported: rowsToInsert.length,
+    nonStockImported,
+    nonStockBeforeCutoff,
     fulfilled,
     awaitingHandover,
     unmatched: Array.from(unmatched.values()),

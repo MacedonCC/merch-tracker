@@ -514,6 +514,30 @@ constant number of Supabase calls regardless of import size — read existing
 keys, read stock list, one bulk upsert — with matching/deduping done in
 memory; keep that shape when touching it.
 
+### Non-stock lines (fees)
+
+`stock_items.non_stock` (migration `20261106000001`, admin-only, and a
+check constraint pins `quantity` at 0) marks a line kept for the record
+only. Today the only one is "Junior Playing Senior Cricket Fee"
+(`20261106000002`), linked to its Wix product. `wix-import` still skips
+fees, so a new one is added by migration, not by an import.
+- **The database never moves stock for it.** `handle_distribution_change`
+  and `handle_order_removed` return early (no `stock_movements` row),
+  `check_order_update`'s unpaid-handover check skips it, and
+  `stock_overview` reports `committed`/`available`/`shortfall` as 0 and
+  status `ok`.
+- **Hidden wherever retired lines are** (Stock, Restock, home tiles,
+  `/sell`, Add order). `lib/wix-push.ts` skips it, so Wix keeps it
+  untracked and unlimited.
+- **wix-sync** imports a paid fee line already handed over (Done, set
+  in the INSERT) and `order_group = 'juniors'`. It skips fee orders placed
+  before `NON_STOCK_FROM` (1 Jul 2026, Melbourne), and that cut-off
+  applies only to non-stock lines. Fee lines never reach the payment-link
+  matcher, which also drops them itself.
+- **Orders page:** fee orders get a `fee` state, so they never appear in
+  Ready, Waiting, Unpaid, Has gear or the stock queue. They are listed only
+  under the **Fees** switch, which shows Paid / Not paid.
+
 ### The quick-sale flow (`/sell`)
 
 `app/sell/page.tsx` + `components/SellFlow.tsx` — a single-screen,

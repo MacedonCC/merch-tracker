@@ -91,6 +91,7 @@ export async function POST(req: NextRequest) {
     ...result,
     sync: {
       imported: sync.imported,
+      nonStockImported: sync.nonStockImported,
       totalFetched: sync.totalFetched,
       unmatched: sync.unmatched,
       paymentLinkMerges: sync.paymentLinkMerges,

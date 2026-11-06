@@ -45,16 +45,21 @@ export default function HomeTiles() {
         supabase
           .from('orders')
           .select('quantity, payment_status, distributed_at, stock_item_id, ordered_at'),
-        supabase.from('stock_items').select('id, retired_at, wix_listed_at'),
+        supabase.from('stock_items').select('id, retired_at, wix_listed_at, non_stock'),
       ]);
 
       const retired = new Set(
         (meta ?? []).filter((m) => m.retired_at).map((m) => m.id as string)
       );
+      // Non-stock lines (fees) are left out of every figure here: they
+      // hold nothing, are never reordered and are never handed over.
+      const nonStock = new Set(
+        (meta ?? []).filter((m) => m.non_stock).map((m) => m.id as string)
+      );
       const listedAt = new Map(
         (meta ?? []).map((m) => [m.id as string, (m.wix_listed_at as string | null) ?? null])
       );
-      const live = (stock ?? []).filter((s) => !retired.has(s.id as string));
+      const live = (stock ?? []).filter((s) => !retired.has(s.id as string) && !nonStock.has(s.id as string));
 
       // Handovers are judged on every line, retired or not: an order
       // placed before a line was retired is still owed, and hiding the
@@ -63,6 +68,7 @@ export default function HomeTiles() {
 
       const readyToHandOver = (orders ?? []).filter((o) => {
         if (o.payment_status !== 'paid' || o.distributed_at) return false;
+        if (o.stock_item_id && nonStock.has(o.stock_item_id)) return false;
         const onHand = o.stock_item_id ? onHandById.get(o.stock_item_id) : undefined;
         return onHand !== undefined && onHand >= o.quantity;
       }).length;
@@ -76,7 +82,7 @@ export default function HomeTiles() {
         stock: (stock ?? []) as unknown as RestockStockRow[],
         orders: (orders ?? []) as unknown as RestockOrderRow[],
         listedAt,
-        retired,
+        retired: new Set([...retired, ...nonStock]),
       });
 
       setCounts({

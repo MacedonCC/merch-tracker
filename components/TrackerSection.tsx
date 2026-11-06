@@ -139,7 +139,7 @@ interface OrderRow {
   // Shared by the rows of one /sell checkout (migration 20261105000002).
   // Only the payment email and message read it.
   sale_id?: string | null;
-  stock_items?: { name: string; size: string; wix_product_url?: string | null; wix_variant_id?: string | null } | null;
+  stock_items?: { name: string; size: string; wix_product_url?: string | null; wix_variant_id?: string | null; non_stock?: boolean } | null;
   // Only present when a different size was handed over than was
   // ordered — see "Hand over a different size" below.
   given_item?: { name: string; size: string } | null;
@@ -275,7 +275,12 @@ function groupStock(rows: StockRow[]): StockGroup[] {
 // 'refunded' counts as not paid here, same as 'pending'. Nothing in the
 // app sets it, so this is theoretical, but a refunded order that was
 // handed over now reads as owing rather than done.
-type OrderState = 'unpaid' | 'owing' | 'ready' | 'waiting' | 'done';
+// 'fee': an order on a non-stock line (stock_items.non_stock). Record
+// keeping only - it is never Ready, Waiting, Unpaid or Has gear, never
+// joins the stock queue below, and is listed only under the Fees switch.
+type OrderState = 'unpaid' | 'owing' | 'ready' | 'waiting' | 'done' | 'fee';
+
+const isFeeOrder = (o: OrderRow) => o.stock_items?.non_stock === true;
 
 // Ready vs waiting is a question about a QUEUE, not about one order,
 // so the whole list is classified at once rather than each row on its
@@ -302,6 +307,7 @@ function classifyOrders(
   const queue: OrderRow[] = [];
 
   for (const o of orders) {
+    if (isFeeOrder(o)) { states.set(o.id, 'fee'); continue; }
     const paid = o.payment_status === 'paid';
     if (o.distributed_at) states.set(o.id, paid ? 'done' : 'owing');
     else if (!paid) states.set(o.id, 'unpaid');
@@ -339,7 +345,7 @@ function classifyOrders(
 // end as lookups rather than work. Six of them, which is why the row is
 // a 6-up grid on desktop and 3 x 2 on a phone rather than a wrapping
 // flex line that reflows differently at every width.
-const CHIPS: { key: 'all' | OrderState; label: string }[] = [
+const CHIPS: { key: 'all' | Exclude<OrderState, 'fee'>; label: string }[] = [
   { key: 'ready', label: 'Ready' },
   { key: 'waiting', label: 'Waiting on stock' },
   { key: 'unpaid', label: 'Unpaid' },
@@ -349,18 +355,23 @@ const CHIPS: { key: 'all' | OrderState; label: string }[] = [
 ];
 
 type OrderGroupName = 'juniors' | 'seniors';
-type GroupFilter = 'juniors' | 'seniors' | 'unassigned' | 'all';
+type GroupFilter = 'juniors' | 'seniors' | 'unassigned' | 'all' | 'fees';
 
 const GROUP_FILTERS: { key: GroupFilter; label: string }[] = [
   { key: 'juniors', label: 'Juniors' },
   { key: 'seniors', label: 'Seniors' },
   { key: 'unassigned', label: 'Unassigned' },
   { key: 'all', label: 'All' },
+  { key: 'fees', label: 'Fees' },
 ];
 
 const GROUP_FILTER_KEY = 'ordersGroupFilter';
 
+// Fee orders live under Fees and nowhere else, so Juniors / Seniors /
+// Unassigned / All stay a list of gear.
 function inGroup(o: OrderRow, f: GroupFilter): boolean {
+  if (f === 'fees') return isFeeOrder(o);
+  if (isFeeOrder(o)) return false;
   if (f === 'all') return true;
   if (f === 'unassigned') return o.order_group == null;
   return o.order_group === f;
@@ -439,7 +450,7 @@ export default function TrackerSection({
   const [cat, setCat] = useState('');
   const [level, setLevel] = useState('');
   const [orderSearch, setOrderSearch] = useState('');
-  const [orderChip, setOrderChip] = useState<'all' | OrderState>('ready');
+  const [orderChip, setOrderChip] = useState<'all' | Exclude<OrderState, 'fee'>>('ready');
   // Remembered per device. Read after mount so the server render and
   // the first client render agree; storage can be missing or throw.
   const [groupFilter, setGroupFilterState] = useState<GroupFilter>('all');
@@ -473,17 +484,20 @@ export default function TrackerSection({
         // given_stock_item_id), so both embeds need an explicit hint —
         // PostgREST refuses an ambiguous embed even when only one is
         // requested.
-        .select('*, stock_items!stock_item_id(name, size, wix_product_url, wix_variant_id), given_item:stock_items!given_stock_item_id(name, size)')
+        .select('*, stock_items!stock_item_id(name, size, wix_product_url, wix_variant_id, non_stock), given_item:stock_items!given_stock_item_id(name, size)')
         .order('ordered_at', { ascending: false }),
-      supabase.from('stock_items').select('id, wix_listed_at, retired_at'),
+      supabase.from('stock_items').select('id, wix_listed_at, retired_at, non_stock'),
     ]);
     setStock((s as StockRow[]) ?? []);
     setOrders((o as OrderRow[]) ?? []);
     const meta = (listed ?? []) as Array<{
-      id: string; wix_listed_at: string | null; retired_at: string | null;
+      id: string; wix_listed_at: string | null; retired_at: string | null; non_stock: boolean;
     }>;
     setListedAt(new Map(meta.map((r) => [r.id, r.wix_listed_at])));
-    setRetired(new Set(meta.filter((r) => r.retired_at).map((r) => r.id)));
+    // Non-stock lines (fees) are hidden exactly where retired lines are:
+    // Stock grid and totals, Restock, Add order. Their orders still
+    // resolve through byId, which is built from the unfiltered list.
+    setRetired(new Set(meta.filter((r) => r.retired_at || r.non_stock).map((r) => r.id)));
     setLoading(false);
   }
 
@@ -650,8 +664,10 @@ export default function TrackerSection({
       const mergedNote = merged
         ? `Matched ${merged} Wix payment${merged === 1 ? '' : 's'} to existing payment-link order${merged === 1 ? '' : 's'}. `
         : '';
+      const fees = result.sync?.nonStockImported ?? 0;
+      const feeNote = fees ? `(${fees} of them fee${fees === 1 ? '' : 's'}, recorded as Done) ` : '';
       const importedNote = imported
-        ? `Imported ${imported} new Wix order line${imported === 1 ? '' : 's'} first. ${mergedNote}`
+        ? `Imported ${imported} new Wix order line${imported === 1 ? '' : 's'} first. ${feeNote}${mergedNote}`
         : merged
           ? mergedNote
           : 'No new Wix orders to import. ';
@@ -959,7 +975,7 @@ export default function TrackerSection({
   const totalShort = liveStock.reduce((n, s) => n + s.shortfall, 0);
   const toOrder = restockUnits;
   const owed = orders
-    .filter((o) => o.payment_status === 'pending')
+    .filter((o) => o.payment_status === 'pending' && !isFeeOrder(o))
     .reduce((n, o) => n + o.unit_price * o.quantity, 0);
 
   // Search and category match the product; the status filter keeps any
@@ -1002,8 +1018,12 @@ export default function TrackerSection({
     seniors: groupCount('seniors'),
     unassigned: groupCount('unassigned'),
     all: groupCount('all'),
+    fees: groupCount('fees'),
   };
-  const openUnassigned = classifiedOrders.filter((c) => c.state !== 'done' && c.order.order_group == null).length;
+  const openUnassigned = classifiedOrders.filter((c) => c.state !== 'done' && c.state !== 'fee' && c.order.order_group == null).length;
+  const showingFees = groupFilter === 'fees';
+  // The Ready layout is for handing gear over; Fees is always a flat list.
+  const readyView = orderChip === 'ready' && !showingFees;
   const groupedOrders = classifiedOrders.filter((c) => inGroup(c.order, groupFilter));
 
   const orderCounts = {
@@ -1027,7 +1047,7 @@ export default function TrackerSection({
     );
   });
 
-  const visibleOrders = orderChip === 'all' ? searchedOrders : searchedOrders.filter((c) => c.state === orderChip);
+  const visibleOrders = orderChip === 'all' || showingFees ? searchedOrders : searchedOrders.filter((c) => c.state === orderChip);
 
   const readyGroups = groupByCustomer(searchedOrders.filter((c) => c.state === 'ready').map((c) => c.order));
 
@@ -1356,7 +1376,7 @@ export default function TrackerSection({
             ))}
           </div>
 
-          <div className="chip-row">
+          {!showingFees && <div className="chip-row">
             {CHIPS.map((c) => (
               <button
                 key={c.key}
@@ -1369,7 +1389,7 @@ export default function TrackerSection({
                 <span>{c.label}</span>
               </button>
             ))}
-          </div>
+          </div>}
 
           <div className="filters">
             <input placeholder="Search by name, email or Wix #" value={orderSearch} onChange={(e) => setOrderSearch(e.target.value)} />
@@ -1387,12 +1407,12 @@ export default function TrackerSection({
                 <th className="orders-qty">Qty</th>
                 <th>Item</th>
                 <th className="orders-date">Ordered</th>
-                {orderChip !== 'ready' && <th>Status</th>}
+                {!readyView && <th>Status</th>}
                 <th className="orders-action"><span className="sr-only">Action</span></th>
                 <th className="orders-menu"><span className="sr-only">More</span></th>
               </tr>
             </thead>
-            {orderChip === 'ready' ? (
+            {readyView ? (
               readyGroups.length === 0 ? (
                 <tbody>
                   <tr><td colSpan={6}><div className="empty">Nothing ready to hand over.</div></td></tr>
@@ -1488,6 +1508,18 @@ export default function TrackerSection({
                           )}
                         </>
                       )}
+                      {state === 'fee' && (
+                        <>
+                          {o.payment_status === 'paid'
+                            ? <span className="pill pill-ok">Paid</span>
+                            : <span className="pill pill-out">Not paid</span>}
+                          {o.wix_order_number && (
+                            <div style={{ fontSize: '0.75rem', color: 'var(--ink-faint)', marginTop: 4 }}>
+                              Wix #{o.wix_order_number}
+                            </div>
+                          )}
+                        </>
+                      )}
                       {state === 'ready' && <span className="pill pill-ok">Ready</span>}
                       {state === 'waiting' && <span className="pill pill-low">Waiting on stock</span>}
                       {state === 'done' && (
@@ -1535,7 +1567,7 @@ export default function TrackerSection({
                           ...(isAdmin && (state === 'ready' || state === 'waiting' || state === 'unpaid')
                             ? [{ label: 'Hand over a different size', onClick: () => openSubstituteModal(o) }]
                             : []),
-                          ...(isAdmin && o.source === 'manual' && o.payment_status === 'pending' && o.customer_email
+                          ...(isAdmin && state !== 'fee' && o.source === 'manual' && o.payment_status === 'pending' && o.customer_email
                             ? [{ label: 'Resend payment link', onClick: () => resendLink(o) }]
                             : []),
                           ...((state === 'unpaid' || state === 'owing') && o.source === 'manual' && o.payment_status === 'pending' && hasShopPage(o)

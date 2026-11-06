@@ -24,6 +24,7 @@ interface MediaRow {
   wix_product_url: string | null;
   wix_variant_id: string | null;
   retired_at: string | null;
+  non_stock: boolean;
 }
 
 export default async function SellPage() {
@@ -38,7 +39,7 @@ export default async function SellPage() {
   // come from stock_items and are merged in by id.
   const [{ data: overview }, { data: media }, { data: names }] = await Promise.all([
     supabase.from('stock_overview').select('id, name, size, price, on_hand, committed, available'),
-    supabase.from('stock_items').select('id, image_url, wix_product_url, wix_variant_id, retired_at'),
+    supabase.from('stock_items').select('id, image_url, wix_product_url, wix_variant_id, retired_at, non_stock'),
     supabase.from('orders').select('customer_name'),
   ]);
 
@@ -56,7 +57,8 @@ export default async function SellPage() {
   // coach mid-queue could sell a JNR12 against a dead line instead of
   // the Juniors product that replaced it.
   const items: SellItem[] = ((overview ?? []) as OverviewRow[])
-    .filter((row) => !mediaById.get(row.id)?.retired_at)
+    // Non-stock lines (fees) are not sold at the ground either.
+    .filter((row) => !mediaById.get(row.id)?.retired_at && !mediaById.get(row.id)?.non_stock)
     .map((row) => ({
       id: row.id,
       name: row.name,
