@@ -357,11 +357,12 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1
 }
 .row-menu-btn:hover { background: var(--wash); color: var(--ink-soft); }
 .row-menu {
-  position: absolute; top: calc(100% + 4px); right: 0; z-index: 30;
+  position: fixed; z-index: 1000; overscroll-behavior: contain;
   background: var(--paper); border: 1px solid var(--line); border-radius: var(--radius);
-  min-width: 140px; overflow: hidden; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  min-width: 140px; overflow-x: hidden; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
 }
-.row-menu[data-up="true"] { top: auto; bottom: calc(100% + 4px); }
+/* Room below the last order so its ⋯ menu can open downwards. */
+.orders-card { margin-bottom: 14rem; }
 .row-menu-item {
   display: block; width: 100%; text-align: left;
   padding: 0.5rem 0.8rem; font-size: 0.82rem;
@@ -373,8 +374,8 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1
 .copy-icon { flex: none; vertical-align: -0.125em; margin-right: 0.45em; }
 .sell-secondary .copy-icon { width: 1.1em; height: 1.1em; }
 /* Bigger ⋯ button and taller menu rows so adjacent items can't be
-   mis-tapped; useLayoutEffect's up/down flip in RowMenu measures the
-   rendered menu itself, so it keeps working at this size unchanged. */
+   mis-tapped; RowMenu measures the rendered menu itself, so its placement keeps
+   working at this size unchanged. */
 @media (max-width: 720px) {
   .row-menu-btn { min-width: 44px; min-height: 44px; font-size: 1.15rem; }
   .row-menu { min-width: 190px; max-width: calc(100vw - 32px); }

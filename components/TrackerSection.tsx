@@ -1,51 +1,80 @@
 'use client';
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { createClient } from '@/lib/supabase-client';
 import { projectRestock } from '@/lib/restock';
 import type { MemberPermissions } from '@/lib/member';
 import { buildPaymentMessage, copyText, linkSharedLabel, sizedProductUrl } from '@/lib/payment-message';
 import CopyIcon from '@/components/CopyIcon';
 
-// The nearest ancestor that would clip an overflowing child (the
-// Orders card has overflow: hidden), or null if only the viewport does.
-function clippingAncestor(el: HTMLElement): HTMLElement | null {
-  for (let p = el.parentElement; p; p = p.parentElement) {
-    if (getComputedStyle(p).overflowY !== 'visible') return p;
-  }
-  return null;
-}
-
 // A small "..." menu for a row's secondary actions — Remove today,
 // anything else later — kept separate from the one visible primary
 // action per row (Mark paid / Hand over / Undo).
+//
+// The menu is portalled to <body> and positioned fixed against the
+// viewport, so no card or table (the Orders card has overflow: hidden)
+// can clip it. It opens downwards, flips up only when it doesn't fit
+// below the visible screen but does fit above, and otherwise takes the
+// larger side with a capped height and scrolls inside.
+const MENU_GAP = 4;
+const MENU_MARGIN = 8;
+
+interface MenuPos { top: number; right: number; maxHeight?: number }
+
 function RowMenu({ actions }: { actions: { label: string; icon?: ReactNode; onClick: () => void }[] }) {
   const [open, setOpen] = useState(false);
-  const [dropUp, setDropUp] = useState(false);
+  const [pos, setPos] = useState<MenuPos | null>(null);
   const ref = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
-  // Opens downwards unless that would run past the clipping container
-  // (or the viewport) and there's more room above — so the last rows'
-  // menus flip up instead of being cut off. Measured before paint, so
-  // there's no visible jump.
+  // Measured before paint (menu rendered hidden first), so no jump.
   useLayoutEffect(() => {
-    if (!open || !ref.current || !menuRef.current) return;
+    if (!open || !ref.current || !menuRef.current) { setPos(null); return; }
     const btn = ref.current.getBoundingClientRect();
-    const menuHeight = menuRef.current.getBoundingClientRect().height + 4;
-    const clip = clippingAncestor(ref.current)?.getBoundingClientRect();
-    const spaceBelow = Math.min(clip?.bottom ?? Infinity, window.innerHeight) - btn.bottom;
-    const spaceAbove = btn.top - Math.max(clip?.top ?? -Infinity, 0);
-    setDropUp(menuHeight > spaceBelow && spaceAbove > spaceBelow);
+    const vh = window.visualViewport?.height ?? window.innerHeight;
+    const vw = document.documentElement.clientWidth;
+    const menuHeight = menuRef.current.scrollHeight;
+    const right = Math.max(MENU_MARGIN, vw - btn.right);
+    const spaceBelow = vh - btn.bottom - MENU_GAP - MENU_MARGIN;
+    const spaceAbove = btn.top - MENU_GAP - MENU_MARGIN;
+    if (menuHeight <= spaceBelow) {
+      setPos({ top: btn.bottom + MENU_GAP, right });
+    } else if (menuHeight <= spaceAbove) {
+      setPos({ top: btn.top - MENU_GAP - menuHeight, right });
+    } else if (spaceBelow >= spaceAbove) {
+      setPos({ top: btn.bottom + MENU_GAP, right, maxHeight: Math.max(spaceBelow, 88) });
+    } else {
+      setPos({ top: MENU_MARGIN, right, maxHeight: spaceAbove });
+    }
   }, [open]);
 
   useEffect(() => {
     if (!open) return;
-    function onPointerDown(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    function onPointerDown(e: Event) {
+      const t = e.target as Node;
+      if (ref.current?.contains(t) || menuRef.current?.contains(t)) return;
+      setOpen(false);
     }
+    // A fixed menu would drift away from its row on scroll, so close it.
+    function onScroll(e: Event) {
+      if (menuRef.current?.contains(e.target as Node)) return;
+      setOpen(false);
+    }
+    function onKey(e: KeyboardEvent) { if (e.key === 'Escape') setOpen(false); }
+    function close() { setOpen(false); }
     document.addEventListener('mousedown', onPointerDown);
-    return () => document.removeEventListener('mousedown', onPointerDown);
+    document.addEventListener('touchstart', onPointerDown, { passive: true });
+    document.addEventListener('keydown', onKey);
+    window.addEventListener('scroll', onScroll, true);
+    window.addEventListener('resize', close);
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown);
+      document.removeEventListener('touchstart', onPointerDown);
+      document.removeEventListener('keydown', onKey);
+      window.removeEventListener('scroll', onScroll, true);
+      window.removeEventListener('resize', close);
+    };
   }, [open]);
 
   if (actions.length === 0) return null;
@@ -62,8 +91,19 @@ function RowMenu({ actions }: { actions: { label: string; icon?: ReactNode; onCl
       >
         ⋯
       </button>
-      {open && (
-        <div className="row-menu" role="menu" ref={menuRef} data-up={dropUp}>
+      {open && createPortal(
+        <div
+          className="row-menu"
+          role="menu"
+          ref={menuRef}
+          style={{
+            top: pos?.top ?? 0,
+            right: pos?.right ?? 0,
+            maxHeight: pos?.maxHeight,
+            overflowY: pos?.maxHeight ? 'auto' : undefined,
+            visibility: pos ? 'visible' : 'hidden',
+          }}
+        >
           {actions.map((a) => (
             <button
               key={a.label}
@@ -76,7 +116,8 @@ function RowMenu({ actions }: { actions: { label: string; icon?: ReactNode; onCl
               {a.label}
             </button>
           ))}
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );
@@ -1377,7 +1418,7 @@ export default function TrackerSection({
 
       {/* ---------------- Orders ---------------- */}
       {section === 'orders' && (
-        <div className="card">
+        <div className="card orders-card">
           <div className="card-head">
             <h2>Orders</h2>
             <button className="btn-solid" onClick={() => setModal('order')}>Add order</button>
