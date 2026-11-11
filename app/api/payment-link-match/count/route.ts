@@ -4,9 +4,10 @@ import { requireAdmin } from '@/lib/member';
 import { loadReviewList } from '@/lib/payment-link-review';
 
 // The Admin nav tab's badge: how many pairs on the Admin page's
-// "Payment-link matches" card are waiting for a decision (needs
-// confirming or near-miss; dismissed pairs are already left out by
-// loadReviewList). Read only. Admin only, checked here because this
+// "Payment-link matches" card are waiting for a decision: exact
+// matches that weren't merged (e.g. automatic matching was off), ones
+// that need confirming, and near-misses. Every pair on the card counts;
+// dismissed pairs are already left out by loadReviewList. Read only. Admin only, checked here because this
 // uses the service-role client (dismissals have no RLS policies).
 
 export const dynamic = 'force-dynamic';
@@ -17,8 +18,7 @@ export async function GET() {
 
   try {
     const pairs = await loadReviewList(createAdminSupabase());
-    const count = pairs.filter((p) => p.kind === 'confirm' || p.kind === 'near-miss').length;
-    return NextResponse.json({ count });
+    return NextResponse.json({ count: pairs.length });
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : 'Read failed.' }, { status: 500 });
   }
