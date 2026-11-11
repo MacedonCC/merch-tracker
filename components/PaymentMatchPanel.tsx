@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import type { ReviewOrder, ReviewPair } from '@/lib/payment-link-review';
+import { PAYMENT_MATCHES_CHANGED } from '@/components/Header';
 
 // The Admin page's "Payment-link matches" card: /sell payment-link
 // orders and Wix payments that may be the same sale but were not merged
@@ -74,6 +75,7 @@ export default function PaymentMatchPanel({
           ? keyOf(q) !== keyOf(p)
           : q.manual.orderId !== p.manual.orderId && q.wix.orderId !== p.wix.orderId,
       ));
+      window.dispatchEvent(new Event(PAYMENT_MATCHES_CHANGED));
       setMessage({
         ok: true,
         text: action === 'approve' ? `Merged. ${p.manual.reference} is now paid.` : 'Dismissed.',

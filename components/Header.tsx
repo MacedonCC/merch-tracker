@@ -22,6 +22,10 @@ const NAV_ITEMS = [
 // the role on the server.
 const ADMIN_ITEM = { label: 'Admin', href: '/admin' };
 
+// Fired by PaymentMatchPanel after an approve/dismiss so the badge
+// on the Admin tab catches up without a reload.
+export const PAYMENT_MATCHES_CHANGED = 'payment-matches-changed';
+
 export default function Header({
   userEmail,
   fullName,
@@ -35,6 +39,25 @@ export default function Header({
   const pathname = usePathname();
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const [matchCount, setMatchCount] = useState(0);
+
+  // Pairs on the Admin page's "Payment-link matches" card waiting for
+  // a decision. Display only: a failed read just shows no badge.
+  useEffect(() => {
+    if (!isAdmin) return;
+    let cancelled = false;
+    async function load() {
+      try {
+        const res = await fetch('/api/payment-link-match/count', { cache: 'no-store' });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!cancelled && typeof data.count === 'number') setMatchCount(data.count);
+      } catch { /* no badge */ }
+    }
+    load();
+    window.addEventListener(PAYMENT_MATCHES_CHANGED, load);
+    return () => { cancelled = true; window.removeEventListener(PAYMENT_MATCHES_CHANGED, load); };
+  }, [isAdmin, pathname]);
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -109,6 +132,15 @@ export default function Header({
           {(isAdmin ? [...NAV_ITEMS, ADMIN_ITEM] : NAV_ITEMS).map((n) => (
             <Link key={n.href} href={n.href} className="nav-tab" data-active={isActive(n.href)}>
               {n.label}
+              {n.href === ADMIN_ITEM.href && matchCount > 0 && (
+                <span
+                  className="nav-badge"
+                  aria-label={`${matchCount} payment-link ${matchCount === 1 ? 'match' : 'matches'} to review`}
+                  title={`${matchCount} payment-link ${matchCount === 1 ? 'match' : 'matches'} to review`}
+                >
+                  {matchCount > 99 ? '99+' : matchCount}
+                </span>
+              )}
             </Link>
           ))}
         </div>
