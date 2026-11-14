@@ -173,7 +173,7 @@ Wix, so a garment that is sold out or already spoken for cannot be bought
 online. **This is on in production** — `WIX_PUSH_ENABLED` is `true`, and the
 tracker is what decides what the shop will sell. Setting the variable to
 anything else turns the push off and the sync behaves as it did before it
-existed. Admins can also push on demand with **Push to Wix now** on the Stock
+existed. Admins can also sync on demand with **Sync with Wix** on the Stock
 page, which imports the day's Wix orders first, shows what it will change and
 asks before sending. Every push is recorded in `wix_stock_pushes`.
 

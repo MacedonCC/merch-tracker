@@ -58,7 +58,7 @@ import {
 // availability back to Wix. The push is the caller's job, so that
 // every caller is forced to put it after the import (see the ordering
 // note in lib/wix-push.ts). Callers today: app/api/wix-sync (the daily
-// cron) and app/api/wix-push's POST (the "Push to Wix now" button).
+// cron) and app/api/wix-push's POST (the "Sync with Wix" button).
 //
 // PAYMENT-LINK MATCHING (PAYMENT_LINK_MATCH_ENABLED=true, default off).
 // A /sell payment link only opens the Wix product page, so the

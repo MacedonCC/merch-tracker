@@ -7,7 +7,7 @@ import { runWixSync } from '@/lib/wix-sync-run';
 //
 // Two callers, two auth styles, which is why this route checks both:
 //   - the daily run, which arrives with CRON_SECRET and no session
-//   - the "Push to Wix now" button on the Stock page, which arrives
+//   - the "Sync with Wix" button on the Stock page, which arrives
 //     with an admin's cookie and no secret
 // Admin-only for the browser path: this takes sizes off sale in the
 // public shop, which is further-reaching than anything a helper can do.

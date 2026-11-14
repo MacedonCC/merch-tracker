@@ -988,13 +988,13 @@ th.num, td.num { text-align: right; }
 
 /* Card header with more than one action. */
 .head-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-/* "Push to Wix now" / "Add item" / "Add order" — the card-head buttons
+/* "Sync with Wix" / "Add item" / "Add order" — the card-head buttons
    on Orders and Stock — get a comfortable tap target on a phone. */
 @media (max-width: 720px) {
   .card-head button { min-height: 44px; padding: 10px 16px; font-size: 0.85rem; }
 }
 
-/* Result of a "Push to Wix now". Persistent rather than a timed flash:
+/* Result of a "Sync with Wix". Persistent rather than a timed flash:
    it reports a change to the public shop, which is worth reading. */
 .push-summary {
   display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;

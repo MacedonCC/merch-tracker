@@ -11,7 +11,7 @@ import { pushAvailableToWix, pushEnabled } from '@/lib/wix-push';
 // is stale-low and so `available` is stale-high; pushing first would
 // raise Wix's count and re-offer something already sold. Any other
 // caller that pushes must import first too — app/api/wix-push's POST
-// does exactly this, so the "Push to Wix now" button mid-day behaves
+// does exactly this, so the "Sync with Wix" button mid-day behaves
 // like the evening cron.
 //
 // The import itself lives in lib/wix-sync-run.ts, shared with that

@@ -211,7 +211,7 @@ and the import our `available` is stale-*high*; pushing in that window
 raises Wix's count and re-offers a garment that has just been bought.
 That is why the import lives in `lib/wix-sync-run.ts` (`runWixSync()`)
 rather than inside the route: `app/api/wix-sync` (the cron) and the
-POST half of `app/api/wix-push` (the "Push to Wix now" button on the
+POST half of `app/api/wix-push` (the "Sync with Wix" button on the
 Stock page, which an admin can press at any hour) both call it
 immediately before pushing. The button's GET preview does not import —
 it stays a pure read — so its figures can read slightly high, which the

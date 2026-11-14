@@ -694,7 +694,7 @@ export default function TrackerSection({
           : '\n\nWIX_PUSH_ENABLED is off, so the orders will be imported '
             + 'but nothing will be sent to Wix.');
       if (!window.confirm(summary)) {
-        setPushSummary('Push cancelled — nothing was sent to Wix.');
+        setPushSummary('Sync cancelled — nothing was imported or sent.');
         return;
       }
 
@@ -1202,7 +1202,7 @@ export default function TrackerSection({
             {isAdmin && (
               <div className="head-actions">
                 <button className="btn-mini" disabled={pushing} onClick={pushToWix}>
-                  {pushing ? 'Pushing…' : 'Push to Wix now'}
+                  {pushing ? 'Syncing…' : 'Sync with Wix'}
                 </button>
                 <button className="btn-solid" onClick={() => setModal('item')}>Add item</button>
               </div>
